@@ -275,6 +275,7 @@ class Controller:
                 '申请授权并安装', lambda: self.install_backend(install_button)))
             install_button.set_halign(Gtk.Align.START)
             startup.append(install_button)
+            self.refresh_backend_install(install_button)
         self.limit_controls = []
         self.limit_buffer = Gtk.EntryBuffer.new("--", 2)
         self.limit_row(card(rows[1], '照顾电池'))
@@ -294,10 +295,19 @@ class Controller:
         self.supply_section = Gtk.Expander(label='asusd 插拔电源规则', visible=False)
         auto.append(self.supply_section)
 
+    def refresh_backend_install(self, install_button):
+        install_button.set_sensitive(False)
+
+        def update(active):
+            install_button.set_label('后端服务已运行' if active else '安装后端服务')
+            install_button.set_sensitive(not active)
+
+        self.submit(backend_install.service_active, update)
+
     def install_backend(self, install_button):
         install_button.set_sensitive(False)
         self.status.set_label('正在等待管理员授权或安装后端服务…')
-        self.submit(backend_install.install, finished=lambda: install_button.set_sensitive(True))
+        self.submit(backend_install.install, finished=lambda: self.refresh_backend_install(install_button))
 
     def populate_rog_controls(self, features):
         aura = features.get('aura')
@@ -904,7 +914,18 @@ class CombinationEditor:
         pref = '、'.join(cpu.get('energy_performance_preference', [])) or '--'
         governor = '、'.join(cpu.get('scaling_governor', [])) or '--'
         self.epp_live.set_label(f'实际 EPP {pref} · 调速器 {governor}')
-        for key, actual in (state.get('power_limits') or {}).get('attributes', {}).items():
+        power = state.get('power_limits') or self.controller.caps.get('power_limits', {})
+        gpu_block = power.get('gpu_block')
+        self.power_empty.set_visible(bool(gpu_block) or not self.power_rows)
+        self.power_empty.set_label(gpu_block or power.get('reason', '未检测到可调功耗'))
+        for key, (check, field, reading, default, data) in self.power_rows.items():
+            if key.startswith('nv_'):
+                check.set_sensitive(not gpu_block)
+                field.set_sensitive(not gpu_block)
+                default.set_sensitive(not gpu_block and data.get('default') is not None)
+                if gpu_block:
+                    reading.set_label(gpu_block)
+        for key, actual in power.get('attributes', {}).items():
             if key not in self.power_rows:
                 continue
             check, field, reading, default, former = self.power_rows[key]

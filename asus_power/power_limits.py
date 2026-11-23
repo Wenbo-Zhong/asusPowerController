@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import subprocess
+from .gpu_scope import external_pci, read_metadata
 
 ATTRIBUTES = {
     'ppt_pl1_spl': '处理器持续功率（SPL / PL1）',
@@ -51,9 +52,40 @@ class PowerLimits:
             sources.append((path.parent.name, path.read_text().strip()))
         return {'profile': profile, 'sources': sources}
 
-    def read_attributes(self):
+    def gpu_block_reason(self):
+        try:
+            owner = json.loads(self.command(
+                'call', 'org.freedesktop.DBus', '/org/freedesktop/DBus',
+                'org.freedesktop.DBus', 'NameHasOwner', 's', 'io.github.usb4gpumanager.Manager',
+            ))['data']
+            if owner == [True]:
+                return '独显由 USB4 GPU Manager 管理'
+            if owner != [False]:
+                raise ValueError('unknown D-Bus owner state')
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError):
+            return '无法确认独显管理权，已暂停独显调节'
+
+        devices = [path.resolve() for path in (self.root / 'bus/pci/devices').glob('*')
+                   if read_metadata(path / 'class').startswith('0x03')]
+        if any(external_pci(device) for device in devices):
+            return '检测到外接显卡，已暂停独显调节'
+        internal = [device for device in devices if read_metadata(device / 'vendor') == '0x10de']
+        if len(internal) != 1:
+            return '无法确认唯一的机身 NVIDIA 独显'
+        device = internal[0]
+        if (device / 'driver').resolve().name != 'nvidia':
+            return '机身独显未由 NVIDIA 驱动管理'
+        if read_metadata(device / 'power/runtime_status') != 'active':
+            return '机身独显未处于活动状态'
+        return ''
+
+    def read_attributes(self, gpu_block=None):
+        if gpu_block is None:
+            gpu_block = self.gpu_block_reason()
         values = {}
         for name, label in ATTRIBUTES.items():
+            if gpu_block and name.startswith('nv_'):
+                continue
             directory = self.attributes / name
             try:
                 data = {key: int((directory / file).read_text().strip()) for key, file in
@@ -72,16 +104,18 @@ class PowerLimits:
         return values
 
     def status(self):
-        values = self.read_attributes()
+        gpu_block = self.gpu_block_reason()
+        values = self.read_attributes(gpu_block)
         if not values:
-            return {'supported': False, 'attributes': {}, 'reason': '当前驱动未开放可调功率接口'}
+            return {'supported': False, 'attributes': {}, 'reason': gpu_block or '当前驱动未开放可调功率接口',
+                    'gpu_block': gpu_block}
         try:
             for name, data in values.items():
                 data['pending'] = self.pending(name)
             return {'supported': True, 'attributes': values, 'enabled': self.enabled(),
-                    'context': self.context()}
+                    'context': self.context(), 'gpu_block': gpu_block}
         except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError) as error:
-            return {'supported': False, 'attributes': values, 'reason': str(error)}
+            return {'supported': False, 'attributes': values, 'reason': str(error), 'gpu_block': gpu_block}
 
     def set_enabled(self, enabled):
         if type(enabled) is not bool:
@@ -93,7 +127,7 @@ class PowerLimits:
         return '已启用当前方案的功率调节' if enabled else '已关闭当前方案的功率调节'
 
     def pending(self, name):
-        if not name.startswith('nv_'):
+        if not name.startswith('nv_') or self.gpu_block_reason():
             return None
         try:
             value = self.get('/xyz/ljones/asus_armoury/' + name, ARMOURY, 'QueuedGpuValue')
@@ -102,12 +136,16 @@ class PowerLimits:
             return None
 
     def write(self, name, value):
+        if name.startswith('nv_') and (reason := self.gpu_block_reason()):
+            raise RuntimeError(reason)
         self.command('set-property', SERVICE, '/xyz/ljones/asus_armoury/' + name,
                      ARMOURY, 'CurrentValue', 'i', str(value))
 
     def apply(self, name, value, reset=False):
         if name not in ATTRIBUTES:
             raise ValueError('不支持此功率属性')
+        if name.startswith('nv_') and (reason := self.gpu_block_reason()):
+            raise RuntimeError(reason)
         context = self.context()
         before = self.read_attributes().get(name)
         if before is None:

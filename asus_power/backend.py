@@ -9,6 +9,7 @@ from .profile_epp import ProfileEpp
 from .rog_features import RogFeatures
 from .fan_curves import FanCurves
 from .power_limits import PowerLimits
+from .gpu_scope import external_pci, graphics_device, read_metadata
 from .igpu import HELPER, clock_info, find_devices, trusted_helper
 
 
@@ -61,7 +62,7 @@ class LinuxBackend:
         self.hwmon = sorted((self.root / 'class/hwmon').glob('*'))
         self.fans = []
         for h in self.hwmon:
-            if read(h / 'name') in ('asus', 'asus_custom_fan_curve'):
+            if graphics_device(h) is None and read(h / 'name') in ('asus', 'asus_custom_fan_curve'):
                 for index, name in [(1, 'cpu'), (2, 'gpu'), (3, 'mid')]:
                     if (h / f'pwm{index}_auto_point1_temp').exists():
                         if name not in self.fans:
@@ -215,7 +216,14 @@ class LinuxBackend:
         external = [number(p / 'online') for p in self.supplies if read(p / 'type') != 'Battery' and (p / 'online').exists()]
         ac = any(v == 1 for v in external) if any(v is not None for v in external) else None
         sensors = {}
+        power_limits = self.power_limits()
         for h in self.hwmon:
+            device = graphics_device(h)
+            if device is not None and (external_pci(device) or (
+                    read_metadata(device / 'vendor') == '0x10de'
+                    and (power_limits.get('gpu_block') or
+                         read_metadata(device / 'power/runtime_status') != 'active'))):
+                continue
             name = read(h / 'name', h.name)
             for p in sorted(h.glob('temp*_input')):
                 value = number(p, 1000)
@@ -232,7 +240,7 @@ class LinuxBackend:
                 'limit': battery_info.get('limit_percent'),
                 'battery_watts': battery_info.get('power_w'),
                 'sensors': sensors, 'igpu_clock': self.igpu_clock(), 'cpu_epp': self.cpu_epp_status(),
-                'power_limits': self.power_limits()}
+                'power_limits': power_limits}
 
     def set_profile(self, profile):
         if not self.modern or profile not in self.profiles:

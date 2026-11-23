@@ -3,7 +3,7 @@
 set -eu
 root=${1:?usage: stage.sh STAGING_DIRECTORY}
 app="$root/usr/lib/asus-power-controller"
-install -d "$app/asus_power" "$app/scripts" "$root/usr/bin"
+install -d -m 755 "$app" "$app/asus_power" "$app/scripts" "$root/usr/bin"
 install -m644 asus_power/*.py "$app/asus_power/"
 install -m644 scripts/desktop_launcher.py "$app/scripts/"
 install -Dm644 packaging/asus-power-controller.desktop "$root/usr/share/applications/asus-power-controller.desktop"

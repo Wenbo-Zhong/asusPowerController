@@ -28,6 +28,15 @@ case "$format" in
             install -Dm755 packaging/install-backend "$root/usr/lib/$name/install-backend"
         fi
         mkdir -p "$root/DEBIAN"
+        cat > "$root/DEBIAN/postinst" <<'SCRIPT'
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    # dpkg preserves permissions on directories that already exist.
+    chmod 755 /usr/lib/asus-power-controller
+fi
+SCRIPT
+        chmod 755 "$root/DEBIAN/postinst"
         cat > "$root/DEBIAN/control" <<CONTROL
 Package: $name
 Version: $version-$revision

@@ -27,9 +27,19 @@ class PowerTests(unittest.TestCase):
         self.cache_only = False
         self.switch_context = False
         self.calls = []
+        self.manager_running = False
+        device = self.root / 'bus/pci/devices/0000:01:00.0'
+        (device / 'power').mkdir(parents=True)
+        (device / 'power/runtime_status').write_text('active')
+        (device / 'class').write_text('0x030200')
+        (device / 'vendor').write_text('0x10de')
+        (device / 'driver').symlink_to('/sys/bus/pci/drivers/nvidia')
+        self.device = device
         self.api = PowerLimits(self.root, self.runner)
 
     def runner(self, args, **kwargs):
+        if 'NameHasOwner' in args:
+            return subprocess.CompletedProcess(args, 0, json.dumps({'data': [self.manager_running]}), '')
         self.calls.append(args)
         if 'get-property' in args:
             value = self.enabled if args[-1] == 'EnablePptGroup' else self.queue.get(args[-3].split('/')[-1], -1)
@@ -80,7 +90,20 @@ class PowerTests(unittest.TestCase):
         self.assertEqual(self.api.read_attributes()['ppt_pl1_spl']['current'], 60)
         self.assertEqual(self.calls[-1][-1], '60')
 
-    def test_sleeping_gpu_setting_is_reported_as_queued(self):
+    def test_gpu_manager_and_external_gpu_block_gpu_access(self):
+        self.manager_running = True
+        self.assertNotIn('nv_tgp', self.api.status()['attributes'])
+        with self.assertRaisesRegex(RuntimeError, 'USB4 GPU Manager'):
+            self.api.write('nv_tgp', 40)
+        self.manager_running = False
+        dock = self.device.with_name('0000:02:00.0')
+        dock.mkdir()
+        (dock / 'class').write_text('0x030000')
+        (dock / 'removable').write_text('removable')
+        self.assertNotIn('nv_tgp', self.api.read_attributes())
+        self.assertEqual(self.api.apply('ppt_pl1_spl', 40), '处理器持续功率（SPL / PL1） 已应用 40 W')
+
+    def test_firmware_deferral_after_gpu_preflight_is_reported_as_queued(self):
         self.defer = True
         self.assertIn('已排队', self.api.apply('nv_tgp', 40))
         self.assertEqual(self.api.status()['attributes']['nv_tgp']['pending'], 40)

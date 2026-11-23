@@ -56,7 +56,7 @@ class ApplyTests(unittest.TestCase):
             self.curves.update(deepcopy(curves))
             self.calls.append(('restore_fans',))
             return []
-        self.api.power = SimpleNamespace(read_attributes=lambda: deepcopy(self.values),
+        self.api.power = SimpleNamespace(gpu_block_reason=lambda: '', read_attributes=lambda: deepcopy(self.values),
             enabled=lambda: self.enabled, pending=lambda name: None,
             set_enabled=set_enabled, apply=apply_power, write=write)
         self.api.fans = SimpleNamespace(read=lambda mode: deepcopy(self.curves), save=save_fan, restore=restore_fans)
@@ -109,6 +109,16 @@ class ApplyTests(unittest.TestCase):
         result = self.api.apply('balanced', 'ac', {'power': {'nv_tgp': 80}, 'fans': {}})
         self.assertIn('排队', result)
         self.assertEqual(self.values['nv_tgp']['current'], 75)
+
+    def test_gpu_manager_leaves_saved_gpu_values_and_applies_cpu_and_fans(self):
+        self.api.power.gpu_block_reason = lambda: '独显由 USB4 GPU Manager 管理'
+        self.entry['power']['nv_tgp'] = 80
+        message = self.api.apply('balanced', 'ac', self.entry)
+        self.assertIn('USB4 GPU Manager', message)
+        self.assertIn(('power', 'ppt_pl1_spl', 40), self.calls)
+        self.assertIn(('fan', False), self.calls)
+        self.assertNotIn(('power', 'nv_tgp', 80), self.calls)
+        self.assertEqual(self.entry['power']['nv_tgp'], 80)
 
     def test_empty_entry_leaves_all_hardware_unchanged(self):
         self.api.apply('balanced', 'ac', {'power': {}, 'fans': {}})

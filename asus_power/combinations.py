@@ -1,6 +1,7 @@
 """Six independent power-source/profile configurations and transactional apply."""
 from copy import deepcopy
 import json
+from .combination_presets import for_machine
 from .fan_curves import validate as validate_curve, FanCurves
 from .power_limits import ATTRIBUTES, PowerLimits
 
@@ -39,7 +40,10 @@ def validate(settings):
 
 def normalized(value):
     if value is None:
-        return defaults()
+        value = defaults()
+        for_machine(value['entries'])
+        validate(value)
+        return value
     value = deepcopy(value)
     if isinstance(value, dict):
         value.pop('epp_values', None)
@@ -98,6 +102,11 @@ class CombinationApplier:
             if self.backend.combination_context() != context:
                 raise RuntimeError('应用期间切换了电源或运行方式，请等待下一次状态刷新')
 
+        gpu_block = (self.power.gpu_block_reason()
+                     if any(name.startswith('nv_') for name in entry['power']) else '')
+        if gpu_block:
+            entry = dict(entry, power={name: value for name, value in entry['power'].items()
+                                       if not name.startswith('nv_')})
         attributes = self.power.read_attributes() if entry['power'] else {}
         for name, value in entry['power'].items():
             data = attributes.get(name)
@@ -184,4 +193,7 @@ class CombinationApplier:
         label = {'quiet': '省电', 'balanced': '均衡', 'performance': '性能'}[mode]
         label += ' · 插电' if source == 'ac' else ' · 离电'
         queued = any('排队' in message for message in messages)
+        if gpu_block:
+            status = f'已应用 {label}' if entry['power'] or entry['fans'] else f'已跳过 {label}'
+            return f'{status}；{gpu_block}'
         return f'已应用 {label}' + ('；独显功耗已排队，唤醒后生效' if queued else '')

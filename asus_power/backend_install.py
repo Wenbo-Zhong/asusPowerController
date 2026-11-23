@@ -23,6 +23,17 @@ def available():
         return False
 
 
+def service_active():
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', '--quiet', 'asusd.service'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def install():
     if not available():
         raise RuntimeError('未找到随界面包安装的后端')
