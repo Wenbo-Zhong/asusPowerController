@@ -2,7 +2,7 @@ Name:           asus-power-controller
 Version:        %{app_version}
 Release:        1%{?dist}
 Summary:        Desktop power and cooling controls for ASUS laptops
-License:        GPL-3.0-or-later
+License:        GPL-3.0-only
 Source0:        %{name}-%{version}.tar.gz
 BuildArch:      noarch
 BuildRequires:  desktop-file-utils

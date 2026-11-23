@@ -81,7 +81,7 @@ python3 -m compileall -q asus_power
 
 测试使用临时 sysfs 和模拟命令，涵盖参数拒绝、USB 供电、读取异常、回读失败、命令错误、曲线验证、供电策略和配置恢复，不写入真实硬件。
 
-GPL-3.0-or-later。参考项目和许可证说明见 [分析文档](docs/COMPARISON.md)。
+GPL-3.0-only。参考项目和许可证说明见 [分析文档](docs/COMPARISON.md)。
 
 ## 显示与主题
 
