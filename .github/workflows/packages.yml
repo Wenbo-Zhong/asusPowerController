@@ -1,0 +1,114 @@
+name: Build Linux packages
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      backend_run_id:
+        description: Successful backend workflow run ID to bundle in the DEB
+        type: string
+        required: false
+  workflow_run:
+    workflows: [Build asusctl backend]
+    branches: [main, master]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deb:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3 desktop-file-utils
+      - name: Select backend run
+        id: backend
+        env:
+          REQUESTED_RUN: ${{ github.event.workflow_run.id || inputs.backend_run_id || (github.event_name != 'pull_request' && vars.ASUSCTL_BACKEND_RUN_ID) || '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$REQUESTED_RUN" ]; then exit 0; fi
+          python3 - <<'PY'
+          import json, os, re
+          from urllib.request import Request, urlopen
+          run_id = os.environ['REQUESTED_RUN']
+          if not re.fullmatch(r'[0-9]+', run_id):
+              raise SystemExit('Invalid backend workflow run ID')
+          repo = os.environ['GITHUB_REPOSITORY']
+          url = f"{os.environ['GITHUB_API_URL']}/repos/{repo}/actions/runs/{run_id}"
+          request = Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN']})
+          with urlopen(request, timeout=20) as response:
+              run = json.load(response)
+          if (run['path'].split('@')[0] != '.github/workflows/backend.yml'
+                  or run['conclusion'] != 'success'
+                  or run['head_branch'] not in ('main', 'master')
+                  or (run.get('head_repository') or {}).get('full_name') != repo):
+              raise SystemExit('Select a successful backend run from this repository’s main/master branch')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print(f'run_id={run_id}', file=output)
+          PY
+      - uses: actions/download-artifact@v4
+        if: steps.backend.outputs.run_id != ''
+        with:
+          name: asusctl-ubuntu-26.04-amd64
+          path: backend-artifact
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.backend.outputs.run_id }}
+      - name: Build DEB
+        env:
+          BACKEND_RUN_ID: ${{ steps.backend.outputs.run_id }}
+        run: |
+          if [ -n "$BACKEND_RUN_ID" ]; then
+            set -- backend-artifact/asusctl_*.deb
+            test "$#" -eq 1 && test -f "$1"
+            sh packaging/build.sh deb dist "$1"
+            cp backend-artifact/Cargo.lock backend-artifact/asusctl-source.tar.gz dist/
+          else
+            sh packaging/build.sh deb
+          fi
+      - name: Test installation and entry point
+        run: |
+          apt-get install -y --no-install-recommends ./dist/*.deb
+          asus-power-controller --check
+          if [ -f /usr/lib/asus-power-controller/backend/asusctl.deb ]; then
+            dpkg-deb -f /usr/lib/asus-power-controller/backend/asusctl.deb Package Version
+            apt-get -s --no-remove install /usr/lib/asus-power-controller/backend/asusctl.deb
+          fi
+          cd /tmp
+          /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/asus-power-controller"); from asus_power.gtk_ui import launch'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-26.04-deb
+          path: dist/
+          if-no-files-found: error
+
+  rpm:
+    if: github.event_name != 'workflow_run'
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: dnf install -y rpm-build desktop-file-utils python3
+      - name: Build RPM
+        run: sh packaging/build.sh rpm
+      - name: Verify package contents and dependencies
+        run: |
+          rpm -qp --requires dist/*.rpm | grep -Fx asusctl
+          rpm -qpl dist/*.rpm | grep -Fx /usr/bin/asus-power-controller
+          rpm -qpl dist/*.rpm | grep -Fx /usr/share/applications/asus-power-controller.desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fedora-44-rpm
+          path: dist/*.rpm
+          if-no-files-found: error

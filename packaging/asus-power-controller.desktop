@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ASUS Power Controller
+Name[zh_CN]=电脑管家
+Comment=Manage ASUS laptop power and cooling
+Exec=asus-power-controller
+Icon=preferences-system-power
+Terminal=false
+Categories=Settings;HardwareSettings;
+StartupNotify=false

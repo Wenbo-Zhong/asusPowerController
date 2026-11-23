@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asus-power-controller"
+version = "0.1.0"
+description = "Lightweight Linux desktop control center for ASUS laptops"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+
+[project.scripts]
+asus-power-controller = "asus_power.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["asus_power*"]

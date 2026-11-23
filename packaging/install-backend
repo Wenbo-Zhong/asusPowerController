@@ -1,0 +1,21 @@
+#!/bin/sh
+# Invoked through polkit from the installed desktop package.
+set -eu
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+payload=/usr/lib/asus-power-controller/backend/asusctl.deb
+[ "$(id -u)" = 0 ] && [ "$#" = 0 ] || exit 2
+cd /
+if [ "$(dpkg-deb -f "$payload" Package)" != asusctl ]; then
+    echo 'Embedded package is not asusctl' >&2
+    exit 1
+fi
+# Use the package manager's normal version/conflict checks. Reinstall also
+# handles a prior source install that left unmanaged files at these paths.
+DEBIAN_FRONTEND=noninteractive apt-get -y --reinstall --no-remove install "$payload"
+systemctl daemon-reload
+busctl --system call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus ReloadConfig
+udevadm control --reload
+systemctl restart asusd.service
+systemctl restart asus-shutdown.service
+systemctl is-active --quiet asusd.service

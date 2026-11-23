@@ -1,0 +1,53 @@
+name: Build asusctl backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      asusctl_revision:
+        description: Full 40-character upstream commit SHA
+        type: string
+        default: '61c39ffd855690cf92ded455beedea800dd40e95'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    container: ubuntu:26.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate upstream commit
+        env:
+          REVISION: ${{ inputs.asusctl_revision }}
+        run: printf '%s\n' "$REVISION" | grep -Ex '[a-f0-9]{40}'
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenGamingCollective/asusctl
+          ref: ${{ inputs.asusctl_revision }}
+          path: upstream-asusctl
+          persist-credentials: false
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates git make pkg-config rustup python3 dpkg-dev libudev-dev libclang-dev libsystemd-dev libssl-dev
+          rustup default stable
+      - name: Build backend programs
+        working-directory: upstream-asusctl
+        run: |
+          if [ ! -f Cargo.lock ]; then cargo generate-lockfile; fi
+          cargo build --locked --release -p asusctl -p asusd -p asus-shutdown
+      - name: Package backend and corresponding source
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/upstream-asusctl"
+          sh packaging/build-backend.sh upstream-asusctl dist-backend
+          dpkg-deb --field dist-backend/*.deb Package Version Architecture Depends
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asusctl-ubuntu-26.04-amd64
+          path: dist-backend/
+          if-no-files-found: error
+          retention-days: 90
