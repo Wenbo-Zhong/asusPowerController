@@ -14,6 +14,8 @@ def main():
     else:
         import os
         import sys
+        # Draw the control panel without opening discrete or external GPU nodes.
+        os.environ['GSK_RENDERER'] = 'cairo'
         try:
             from .gtk_ui import launch
         except (ImportError, ValueError) as error:

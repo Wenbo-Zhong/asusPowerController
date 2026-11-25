@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import os
+import subprocess
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -16,6 +17,8 @@ from .combinations import CombinationPolicy, MODES, effective, normalized
 from .config import Policy, load, save
 from .desktop_loop import DesktopLoop, once
 from .fan_curves import validate as validate_curve
+from .firmware import bios_info, check_bios_updates
+from .keyboard_idle import KeyboardIdle
 from .instance import Instance
 from .profile_epp import EPP
 from .power_limits import attribute_unit
@@ -26,6 +29,7 @@ MODENAMES = {'quiet': '静音', 'balanced': '均衡', 'performance': '性能',
              'low-power': '节能', 'custom': '自定义'}
 EPP_NAMES = ('固件默认', '性能优先', '均衡偏性能', '均衡偏省电', '省电优先')
 FAN_NAMES = {'cpu': 'CPU 风扇', 'gpu': 'GPU 风扇', 'mid': '第三风扇'}
+LIGHT_TIMEOUTS = (0, 15, 30, 60, 120, 300)
 
 
 def box(horizontal=False, spacing=10):
@@ -84,6 +88,9 @@ class Controller:
     def __init__(self, app, instance, start_hidden):
         self.app = app
         self.pool = ThreadPoolExecutor(max_workers=1)
+        self.firmware_pool = ThreadPoolExecutor(max_workers=1)
+        self.keyboard_idle = None
+        self.keyboard_busy = False
         self.backend = None
         self.caps = {}
         self.state = {}
@@ -154,6 +161,7 @@ class Controller:
             self.window.present()
         self.submit(self.detect, self.ready)
         GLib.idle_add(once(lambda: self.start_tray(start_hidden)))
+        self.loop.after(1000, self.tick_keyboard)
 
     def start_tray(self, hidden):
         try:
@@ -184,8 +192,8 @@ class Controller:
         self.window.destroy()
         self.app.quit()
 
-    def submit(self, operation, done=None, finished=None):
-        future = self.pool.submit(operation)
+    def submit(self, operation, done=None, finished=None, executor=None):
+        future = (executor or self.pool).submit(operation)
         def receive():
             if self.closing:
                 return
@@ -285,15 +293,109 @@ class Controller:
         row.set_homogeneous(True)
         self.light_buttons = []
         for text, key in [('关闭', 'off'), ('柔和', 'low'), ('适中', 'med'), ('明亮', 'high')]:
-            item = button(text, lambda key=key: self.submit(lambda: self.backend.set_keyboard(key)))
+            item = button(text, lambda key=key: self.submit(lambda: self.set_keyboard(key)))
             item.set_sensitive(False)
             row.append(item)
             self.light_buttons.append(item)
 
         self.aura_section = Gtk.Expander(label='Aura 键盘灯效', visible=False)
         lights.append(self.aura_section)
+        self.build_keyboard_timeout(lights)
+        self.build_bios(page)
         self.supply_section = Gtk.Expander(label='asusd 插拔电源规则', visible=False)
         auto.append(self.supply_section)
+
+    def build_keyboard_timeout(self, parent):
+        section = Gtk.Expander(label='闲置熄灯')
+        parent.append(section)
+        content = box()
+        section.set_child(content)
+        self.keyboard_settings = {}
+        saved = self.settings.get('keyboard_timeout')
+        saved = saved if isinstance(saved, dict) else {}
+        labels = ['不自动关闭', *(f'{seconds} 秒' for seconds in LIGHT_TIMEOUTS[1:])]
+        for source, title in (('ac', '插电'), ('battery', '离电')):
+            row = box(True)
+            caption = label(title, True)
+            caption.set_width_chars(4)
+            row.append(caption)
+            choice = dropdown(labels)
+            value = saved.get(source)
+            choice.set_selected(LIGHT_TIMEOUTS.index(value) if value in LIGHT_TIMEOUTS else 0)
+            choice.set_hexpand(True)
+            row.append(choice)
+            self.keyboard_settings[source] = choice
+            content.append(row)
+        for choice in self.keyboard_settings.values():
+            choice.connect('notify::selected', self.save_keyboard_timeout)
+        self.keyboard_note = label('需要 GNOME 会话的键盘灯和活动检测接口。', True)
+        content.append(self.keyboard_note)
+
+    def save_keyboard_timeout(self, *_):
+        values = {source: LIGHT_TIMEOUTS[choice.get_selected()]
+                  for source, choice in self.keyboard_settings.items()}
+        self.persist(keyboard_timeout=values)
+
+    def set_keyboard(self, level):
+        result = self.backend.set_keyboard(level)
+        if self.keyboard_idle:
+            self.keyboard_idle.restore_level = None
+        return result
+
+    def tick_keyboard(self):
+        if self.closing:
+            return
+        self.loop.after(1000, self.tick_keyboard)
+        ac = self.state.get('ac')
+        source = 'ac' if ac else 'battery'
+        settings = self.settings.get('keyboard_timeout')
+        seconds = settings.get(source, 0) if ac is not None and isinstance(settings, dict) else 0
+        if seconds not in LIGHT_TIMEOUTS:
+            seconds = 0
+        restore_pending = self.keyboard_idle and self.keyboard_idle.restore_level is not None
+        if self.keyboard_busy or (not seconds and not restore_pending):
+            return
+        self.keyboard_busy = True
+
+        def update():
+            try:
+                if self.keyboard_idle is None:
+                    connection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+                    self.keyboard_idle = KeyboardIdle(connection, Gio, GLib)
+                self.keyboard_idle.update(seconds)
+            except GLib.Error:
+                return '当前会话无法检测闲置时间或控制键盘灯。'
+            return '恢复键盘或鼠标活动时会还原亮度。'
+
+        self.submit(update, self.keyboard_note.set_label,
+                    finished=lambda: setattr(self, 'keyboard_busy', False))
+
+    def build_bios(self, page):
+        section = card(page, 'BIOS')
+        version, support = bios_info()
+        section.append(label(f'当前版本 {version or "--"}'))
+        actions = box(True)
+        section.append(actions)
+        self.bios_result = label('', True)
+        section.append(self.bios_result)
+
+        def check():
+            check_button.set_sensitive(False)
+            self.bios_result.set_label('正在检查系统 BIOS 更新…')
+
+            def query():
+                try:
+                    return check_bios_updates()
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                    return f'检查失败：{error}'
+
+            self.submit(query, self.bios_result.set_label,
+                        finished=lambda: check_button.set_sensitive(True), executor=self.firmware_pool)
+
+        check_button = button('检查更新', check)
+        actions.append(check_button)
+        if support:
+            actions.append(Gtk.LinkButton(uri=support, label='ASUS 支持页面'))
 
     def refresh_backend_install(self, install_button):
         install_button.set_sensitive(False)
@@ -735,30 +837,40 @@ class CombinationEditor:
                 self.epp_card.append(label('系统电源服务也可能修改实际 EPP。', True))
         else:
             self.epp_card.append(label(info.get('reason', 'asusd EPP 不可用'), True))
-        power = caps.get('power_limits', {})
-        self.power_empty.set_visible(not power.get('attributes'))
-        self.power_empty.set_label(power.get('reason', '未检测到可调功耗'))
-        for key, data in power.get('attributes', {}).items():
-            row = box(True)
-            self.power_card.append(row)
-            checked = Gtk.CheckButton(label=data['label'])
-            checked.set_hexpand(True)
-            row.append(checked)
-            field = Gtk.SpinButton.new_with_range(data['minimum'], data['maximum'], data['step'])
-            field.set_value(data['current'])
-            row.append(field)
-            row.append(label(attribute_unit(key)))
-            default = button('填入默认值', lambda key=key: self.fill_default(key))
-            row.append(default)
-            reading = label('--', True)
-            self.power_card.append(reading)
-            self.power_rows[key] = (checked, field, reading, default, data)
         fan_info = caps.get('fan_curves', {})
         if fan_info.get('supported'):
             self.reset_fans.set_sensitive(True)
             self.templates[fan_info['initial_profile']] = fan_info['curves']
         self.load_entry()
         self.refresh(self.controller.state)
+
+    def add_power_row(self, key, data):
+        row = box(True)
+        self.power_card.append(row)
+        checked = Gtk.CheckButton(label=data['label'])
+        checked.set_hexpand(True)
+        row.append(checked)
+        field = Gtk.SpinButton.new_with_range(data['minimum'], data['maximum'], data['step'])
+        field.set_value(data['current'])
+        row.append(field)
+        row.append(label(attribute_unit(key)))
+        default = button('填入默认值', lambda key=key: self.fill_default(key))
+        row.append(default)
+        reading = label('--', True)
+        self.power_card.append(reading)
+        self.power_rows[key] = (checked, field, reading, default, data)
+
+        self.load_power_row(key)
+
+    def load_power_row(self, key):
+        check, field, _, _, data = self.power_rows[key]
+        power = self.current_entry()['power']
+        check.set_active(key in power)
+        value = power.get(key, data['current'])
+        # Saved values may belong to a different supply context.
+        field.set_range(min(value, data['minimum']), max(value, data['maximum']))
+        field.set_increments(data['step'], data['step'])
+        field.set_value(value)
 
     def fill_default(self, key):
         check, field, _, _, data = self.power_rows[key]
@@ -785,14 +897,8 @@ class CombinationEditor:
 
     def load_entry(self):
         entry = self.current_entry()
-        for key, (check, field, _, _, data) in self.power_rows.items():
-            check.set_active(key in entry['power'])
-            value = entry['power'].get(key, data['current'])
-            # Saved values can belong to a different supply context. Keep the
-            # draft intact and let the backend validate the active firmware range.
-            field.set_range(min(value, data['minimum']), max(value, data['maximum']))
-            field.set_increments(data['step'], data['step'])
-            field.set_value(value)
+        for key in self.power_rows:
+            self.load_power_row(key)
         self.fan.load(entry['fans'] or self.templates.get(self.selected[0], {}), bool(entry['fans']))
 
     def switch(self):
@@ -916,6 +1022,9 @@ class CombinationEditor:
         self.epp_live.set_label(f'实际 EPP {pref} · 调速器 {governor}')
         power = state.get('power_limits') or self.controller.caps.get('power_limits', {})
         gpu_block = power.get('gpu_block')
+        for key, data in power.get('attributes', {}).items():
+            if key not in self.power_rows:
+                self.add_power_row(key, data)
         self.power_empty.set_visible(bool(gpu_block) or not self.power_rows)
         self.power_empty.set_label(gpu_block or power.get('reason', '未检测到可调功耗'))
         for key, (check, field, reading, default, data) in self.power_rows.items():
@@ -1146,4 +1255,10 @@ def launch(start_hidden=False):
     finally:
         if controller:
             controller.pool.shutdown(wait=True, cancel_futures=True)
+            if controller.keyboard_idle:
+                try:
+                    controller.keyboard_idle.restore()
+                except GLib.Error:
+                    pass
+            controller.firmware_pool.shutdown(wait=False, cancel_futures=True)
         instance.close()

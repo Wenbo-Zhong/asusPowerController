@@ -28,6 +28,7 @@ class PowerTests(unittest.TestCase):
         self.switch_context = False
         self.calls = []
         self.manager_running = False
+        self.manager_automation = True
         device = self.root / 'bus/pci/devices/0000:01:00.0'
         (device / 'power').mkdir(parents=True)
         (device / 'power/runtime_status').write_text('active')
@@ -40,6 +41,9 @@ class PowerTests(unittest.TestCase):
     def runner(self, args, **kwargs):
         if 'NameHasOwner' in args:
             return subprocess.CompletedProcess(args, 0, json.dumps({'data': [self.manager_running]}), '')
+        if 'GetStatus' in args:
+            data = [json.dumps({'automation_enabled': self.manager_automation})]
+            return subprocess.CompletedProcess(args, 0, json.dumps({'data': data}), '')
         self.calls.append(args)
         if 'get-property' in args:
             value = self.enabled if args[-1] == 'EnablePptGroup' else self.queue.get(args[-3].split('/')[-1], -1)
@@ -95,7 +99,12 @@ class PowerTests(unittest.TestCase):
         self.assertNotIn('nv_tgp', self.api.status()['attributes'])
         with self.assertRaisesRegex(RuntimeError, 'USB4 GPU Manager'):
             self.api.write('nv_tgp', 40)
-        self.manager_running = False
+        self.manager_automation = False
+        self.assertIn('nv_tgp', self.api.status()['attributes'])
+        self.assertIn('已应用', self.api.apply('nv_tgp', 40))
+        self.manager_automation = None
+        self.assertNotIn('nv_tgp', self.api.status()['attributes'])
+        self.manager_automation = False
         dock = self.device.with_name('0000:02:00.0')
         dock.mkdir()
         (dock / 'class').write_text('0x030000')

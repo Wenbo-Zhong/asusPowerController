@@ -17,6 +17,8 @@ ATTRIBUTES = {
 SERVICE = 'xyz.ljones.Asusd'
 PLATFORM = 'xyz.ljones.Platform'
 ARMOURY = 'xyz.ljones.AsusArmoury'
+GPU_MANAGER = 'io.github.usb4gpumanager.Manager'
+GPU_MANAGER_PATH = '/io/github/usb4gpumanager/Manager'
 
 
 def attribute_unit(name):
@@ -54,15 +56,22 @@ class PowerLimits:
 
     def gpu_block_reason(self):
         try:
-            owner = json.loads(self.command(
+            owner, = json.loads(self.command(
                 'call', 'org.freedesktop.DBus', '/org/freedesktop/DBus',
-                'org.freedesktop.DBus', 'NameHasOwner', 's', 'io.github.usb4gpumanager.Manager',
+                'org.freedesktop.DBus', 'NameHasOwner', 's', GPU_MANAGER,
             ))['data']
-            if owner == [True]:
-                return '独显由 USB4 GPU Manager 管理'
-            if owner != [False]:
+            if type(owner) is not bool:
                 raise ValueError('unknown D-Bus owner state')
-        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError):
+            if owner:
+                status, = json.loads(self.command(
+                    'call', GPU_MANAGER, GPU_MANAGER_PATH, GPU_MANAGER + '1', 'GetStatus',
+                ))['data']
+                enabled = json.loads(status)['automation_enabled']
+                if type(enabled) is not bool:
+                    raise ValueError('unknown GPU automation state')
+                if enabled:
+                    return 'USB4 GPU Manager 已开启自动显卡管理'
+        except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError):
             return '无法确认独显管理权，已暂停独显调节'
 
         devices = [path.resolve() for path in (self.root / 'bus/pci/devices').glob('*')
