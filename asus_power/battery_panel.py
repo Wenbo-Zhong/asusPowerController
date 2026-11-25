@@ -43,7 +43,7 @@ class BatteryPanel:
         table.columnconfigure((0, 1), weight=1, uniform='battery_details')
         groups = (
             (('当前能量', 'energy'), ('满充能量', 'full'), ('设计能量', 'design'),
-             ('满充电荷量', 'charge_full'), ('设计电荷量', 'charge_design'), ('循环次数', 'cycles')),
+             ('满充电荷量', 'charge_full'), ('设计电荷量', 'charge_design')),
             (('当前电压', 'voltage'), ('充放电电流', 'current'), ('制造商', 'manufacturer'),
              ('型号', 'model'), ('电池类型', 'technology')),
         )
