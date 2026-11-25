@@ -333,9 +333,6 @@ class Application:
         self.submit(fn, lambda result: self.status.set('已保存' + (f'：{result}' if result else '')))
 
     def change_profile(self, mode):
-        if self.enabled.get():
-            self.enabled.set(False)
-            self.save_policy()
         self.perform(lambda: self.backend.set_profile(mode))
 
     def change_limit(self):
@@ -363,8 +360,7 @@ class Application:
         except OSError as error:
             self.status.set(f'配置保存失败：{error}')
             return
-        self.policy.previous = None
-        self.status.set('偏好已保存 · 手动切换运行方式会暂停自动切换')
+        self.status.set('偏好已保存 · 下次供电变化时自动切换')
 
     def save_combinations(self, settings):
         settings = normalized(settings)
@@ -401,9 +397,10 @@ class Application:
             self.limit.set(int(state['limit']))
         self.latest_state = state
         self.refresh_open_pages(state)
-        target = self.policy.target(state['ac'], self.settings)
-        if target and self.backend.modern:
-            self.perform(lambda: self.backend.set_profile(target))
+        ac, profile = state['ac'], state['profile']
+        target = self.policy.target(ac, self.settings)
+        if target and target != profile and self.backend.modern:
+            self.perform(lambda: self.backend.switch_profile_on_power_change(target, profile, ac))
         else:
             self.update_combinations(state)
         self.root.after(3000, self.tick)

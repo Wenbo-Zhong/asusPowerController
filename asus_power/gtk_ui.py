@@ -482,10 +482,8 @@ class Controller:
             content.append(save_button)
 
     def add_mode(self, key):
-        def choose():
-            self.auto.set_active(False)
-            self.submit(lambda: self.backend.set_profile(key))
-        widget = button(MODENAMES.get(key, key), choose)
+        widget = button(MODENAMES.get(key, key),
+                        lambda: self.submit(lambda: self.backend.set_profile(key)))
         widget.set_sensitive(False)
         self.mode_row.append(widget)
         self.mode_buttons[key] = widget
@@ -506,8 +504,7 @@ class Controller:
             index = choice.get_selected()
             if index < len(self.mode_keys):
                 values[key] = self.mode_keys[index]
-        if self.persist(**values):
-            self.policy.previous = None
+        self.persist(**values)
 
     def limit_row(self, parent):
         row = box(True)
@@ -744,8 +741,9 @@ class Controller:
         self.refresh_gpu(state.get('igpu_clock', {}))
         self.combination.refresh(state)
         mode = self.policy.target(ac, self.settings)
-        if mode and mode in self.mode_keys and self.backend.modern:
-            self.submit(lambda: self.backend.set_profile(mode))
+        profile = state['profile']
+        if mode and mode != profile and mode in self.mode_keys and self.backend.modern:
+            self.submit(lambda: self.backend.switch_profile_on_power_change(mode, profile, ac))
             return
         request = self.combination_policy.request(state, self.combinations)
         if request and (request[2]['power'] or request[2]['fans']):

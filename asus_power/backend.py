@@ -79,6 +79,23 @@ class LinuxBackend:
         self.battery = next((p for p in self.batteries if (p / 'charge_control_end_threshold').exists()),
                             self.batteries[0] if self.batteries else None)
 
+    def external_power(self):
+        supplies = [(read(path / 'type'), read(path / 'online')) for path in self.supplies
+                    if read(path / 'scope') != 'Device']
+        if ('Mains', '1') in supplies:
+            return True
+
+        status = read(self.battery / 'status') if self.battery is not None else None
+        if status == 'Discharging':
+            # A USB-C source can report an active PD link while the laptop
+            # still runs down its battery.
+            return False
+        if status == 'Charging':
+            return True
+        online = [value for kind, value in supplies if kind not in (None, 'Battery')
+                  and value in ('0', '1')]
+        return '1' in online if online else None
+
     def command(self, *args):
         if not self.exe:
             raise HardwareError('未安装 asusctl；请先安装发行版提供的 asusctl / asusd')
@@ -119,10 +136,7 @@ class LinuxBackend:
 
     def combination_context(self):
         self.discover_power_supplies()
-        external = [number(path / 'online') for path in self.supplies
-                    if read(path / 'type') != 'Battery' and (path / 'online').exists()]
-        ac = any(value == 1 for value in external) if any(value is not None for value in external) else None
-        return {'profile': read(self.profile_path), 'ac': ac}
+        return {'profile': read(self.profile_path), 'ac': self.external_power()}
 
     def apply_combination(self, mode, source, entry):
         from .combinations import CombinationApplier
@@ -213,8 +227,7 @@ class LinuxBackend:
         self.discover_power_supplies()
         battery = self.battery
         battery_info = read_battery(battery)
-        external = [number(p / 'online') for p in self.supplies if read(p / 'type') != 'Battery' and (p / 'online').exists()]
-        ac = any(v == 1 for v in external) if any(v is not None for v in external) else None
+        ac = self.external_power()
         sensors = {}
         power_limits = self.power_limits()
         for h in self.hwmon:
@@ -241,6 +254,11 @@ class LinuxBackend:
                 'battery_watts': battery_info.get('power_w'),
                 'sensors': sensors, 'igpu_clock': self.igpu_clock(), 'cpu_epp': self.cpu_epp_status(),
                 'power_limits': power_limits}
+
+    def switch_profile_on_power_change(self, target, profile, ac):
+        # The worker may run after a newer desktop profile change or unplug.
+        if self.combination_context() == {'profile': profile, 'ac': ac}:
+            self.set_profile(target)
 
     def set_profile(self, profile):
         if not self.modern or profile not in self.profiles:

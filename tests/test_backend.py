@@ -42,6 +42,22 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(self.backend.snapshot()['ac'])
         self.assertTrue(self.backend.capabilities()['charge_limit'])
 
+    def test_usb_pd_online_does_not_override_battery_discharge(self):
+        self.put('class/power_supply/BAT1/status', 'Discharging')
+        self.assertIs(self.backend.snapshot()['ac'], False)
+        self.assertIs(self.backend.combination_context()['ac'], False)
+        self.put('class/power_supply/BAT1/status', 'Charging')
+        self.assertIs(self.backend.combination_context()['ac'], True)
+        self.put('class/power_supply/BAT1/status', 'Not charging')
+        self.assertIs(self.backend.combination_context()['ac'], True)
+        self.put('class/power_supply/USB/scope', 'Device')
+        self.assertIs(self.backend.combination_context()['ac'], False)
+
+    def test_mains_is_authoritative_when_battery_discharges(self):
+        self.put('class/power_supply/ACAD/online', '1')
+        self.put('class/power_supply/BAT1/status', 'Discharging')
+        self.assertIs(self.backend.combination_context()['ac'], True)
+
     def test_missing_and_malformed_telemetry(self):
         self.put('class/power_supply/BAT1/capacity', 'bad')
         self.assertIsNone(self.backend.snapshot()['battery'])
@@ -77,12 +93,25 @@ class BackendTests(unittest.TestCase):
     def test_power_policy_transitions_and_unknown(self):
         policy = Policy()
         settings = {'enabled': True, 'ac': 'balanced', 'battery': 'quiet'}
-        self.assertEqual(policy.target(True, settings), 'balanced')
+        self.assertIsNone(policy.target(True, settings))
         self.assertIsNone(policy.target(True, settings))
         self.assertEqual(policy.target(False, settings), 'quiet')
+        self.assertIsNone(policy.target(False, settings))
         self.assertIsNone(policy.target(None, settings))
-        self.assertEqual(policy.target(False, settings), 'quiet')
+        self.assertIsNone(policy.target(False, settings))
         self.assertIsNone(policy.target(True, {'enabled': False}))
+        self.assertIsNone(policy.target(True, settings))
+        self.assertEqual(policy.target(False, settings), 'quiet')
+
+    def test_queued_power_switch_preserves_a_newer_profile_or_power_source(self):
+        count = len(self.calls)
+        self.put('firmware/acpi/platform_profile', 'performance')
+        self.backend.switch_profile_on_power_change('balanced', 'quiet', True)
+        self.backend.switch_profile_on_power_change('balanced', 'performance', False)
+        self.assertEqual(len(self.calls), count)
+        with self.assertRaises(HardwareError):
+            self.backend.switch_profile_on_power_change('balanced', 'performance', True)
+        self.assertEqual(self.calls[-1], ['/usr/bin/asusctl', 'profile', 'set', 'balanced'])
 
     def test_corrupt_config_and_roundtrip(self):
         path = self.root / 'config/settings.json'

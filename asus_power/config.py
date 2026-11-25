@@ -38,10 +38,9 @@ class Policy:
         self.previous = None
 
     def target(self, ac, settings):
-        if ac is None or not settings.get('enabled'):
-            self.previous = None
+        if ac is None:
             return None
-        if ac == self.previous:
+        previous, self.previous = self.previous, ac
+        if previous is None or ac == previous or not settings.get('enabled'):
             return None
-        self.previous = ac
         return settings.get('ac' if ac else 'battery')
