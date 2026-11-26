@@ -3,7 +3,8 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
-from asus_power.power_limits import PowerLimits
+from asus_power.hardware.power_limits import PowerLimits
+from asus_power.backend import LinuxBackend
 
 
 class PowerTests(unittest.TestCase):
@@ -131,3 +132,73 @@ class PowerTests(unittest.TestCase):
         self.assertFalse(self.api.status()['enabled'])
         self.api.set_enabled(True)
         self.assertTrue(self.api.status()['enabled'])
+
+    def supply(self, name, **values):
+        directory = self.root / 'class/power_supply' / name
+        directory.mkdir(parents=True, exist_ok=True)
+        for key, value in values.items():
+            (directory / key).write_text(str(value))
+        return directory
+
+    def usb_transition(self, combined):
+        battery = self.supply('BAT0', type='Battery', status='Charging')
+        self.supply('USB', type='USB', online=1)
+        failed = False
+
+        def transition(args, **kwargs):
+            nonlocal failed
+            if '--help' in args:
+                return subprocess.CompletedProcess(args, 0, 'profile battery', '')
+            result = self.runner(args, **kwargs)
+            if 'set-property' in args and args[-3] == 'CurrentValue' and not failed:
+                failed = True
+                (battery / 'status').write_text('Discharging')
+                (self.attributes / 'ppt_pl1_spl/current_value').write_text('80')
+                return subprocess.CompletedProcess(args, 1, '', 'write failed during transition')
+            return result
+
+        backend = LinuxBackend(self.root, transition, '/simulated/asusctl')
+        self.api.bus.runner = transition
+        with self.assertRaisesRegex(RuntimeError, '切换|供电或方案已改变'):
+            if combined:
+                backend.apply_combination(
+                    'balanced', 'ac', {'power': {'ppt_pl1_spl': 40}, 'fans': {}})
+            else:
+                self.api.apply('ppt_pl1_spl', 40)
+        writes = [call for call in self.calls if 'set-property' in call]
+        self.assertEqual([call[-1] for call in writes], ['40'])
+        self.assertEqual(self.api.read_attributes()['ppt_pl1_spl']['current'], 80)
+        self.assertIs(self.api.context()['ac'], False)
+        self.assertEqual(self.api.context(), backend.combination_context())
+
+    def test_usb_status_transition_aborts_direct_power_without_old_rollback(self):
+        self.usb_transition(combined=False)
+
+    def test_usb_status_transition_aborts_combination_without_old_rollback(self):
+        self.usb_transition(combined=True)
+
+    def test_peripheral_online_changes_do_not_abort_system_power_transaction(self):
+        self.supply('BAT0', type='Battery', status='Charging')
+        peripheral = self.supply('mouse', type='USB', scope='Device', online=0)
+        original = self.runner
+
+        def change_peripheral(args, **kwargs):
+            result = original(args, **kwargs)
+            if 'set-property' in args:
+                (peripheral / 'online').write_text('1')
+            return result
+
+        self.api.bus.runner = change_peripheral
+        self.assertIn('已应用', self.api.apply('ppt_pl1_spl', 40))
+        self.assertEqual(self.api.read_attributes()['ppt_pl1_spl']['current'], 40)
+
+    def test_context_uses_threshold_capable_system_battery_and_mains_priority(self):
+        self.supply('BAT0', type='Battery', status='Charging')
+        selected = self.supply('BAT1', type='Battery', status='Discharging',
+                               charge_control_end_threshold=80)
+        self.supply('mouse', type='Battery', scope='Device', status='Charging')
+        self.supply('USB', type='USB', online=1)
+        self.assertIs(self.api.context()['ac'], False)
+        self.supply('ACAD', type='Mains', online=1)
+        self.assertIs(self.api.context()['ac'], True)
+        self.assertEqual(selected.name, 'BAT1')

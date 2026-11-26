@@ -3,11 +3,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import subprocess
 import unittest
-from asus_power.backend import LinuxBackend, HardwareError, validate_curve
+from unittest.mock import patch
+from asus_power.backend import LinuxBackend, HardwareError
 from asus_power.config import Policy, load, save
-
-CURVE = '30c:10%,40c:20%,50c:30%,60c:40%,70c:55%,80c:70%,90c:90%,95c:100%'
-
 
 class BackendTests(unittest.TestCase):
     def setUp(self):
@@ -84,12 +82,6 @@ class BackendTests(unittest.TestCase):
         with self.assertRaisesRegex(HardwareError, 'D-Bus unavailable'):
             self.backend.set_limit(80)
 
-    def test_curve_validation(self):
-        self.assertEqual(validate_curve(CURVE), CURVE)
-        for bad in [CURVE.replace('40c', '30c'), CURVE.replace('95c:100%', '95c:80%'), CURVE + ',99c:100%', CURVE.replace('40c:20%', '40c:1%')]:
-            with self.assertRaises(ValueError):
-                validate_curve(bad)
-
     def test_power_policy_transitions_and_unknown(self):
         policy = Policy()
         settings = {'enabled': True, 'ac': 'balanced', 'battery': 'quiet'}
@@ -121,6 +113,56 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(load(path), {})
         path.write_text('{')
         self.assertEqual(load(path), {})
+
+    def gpu_sensors(self, vendor, status, external=False):
+        device = self.root / 'bus/pci/devices/0000:03:00.0'
+        self.put(str(device.relative_to(self.root) / 'class'), '0x030000')
+        self.put(str(device.relative_to(self.root) / 'vendor'), vendor)
+        self.put(str(device.relative_to(self.root) / 'power/runtime_status'), status)
+        self.put(str(device.relative_to(self.root) / 'removable'),
+                 'removable' if external else 'fixed')
+        sensors = device / 'hwmon/hwmon3'
+        self.put(str(sensors.relative_to(self.root) / 'name'), 'gpu')
+        self.put(str(sensors.relative_to(self.root) / 'temp1_input'), '50000')
+        self.put(str(sensors.relative_to(self.root) / 'fan1_input'), '1200')
+        link = self.root / 'class/hwmon/hwmon3'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if not link.exists():
+            link.symlink_to(sensors, target_is_directory=True)
+        self.backend.hwmon = [link]
+        sensor_root = sensors.resolve()
+        reads = []
+        original = Path.read_text
+
+        def track(path, *args, **kwargs):
+            if sensor_root in path.resolve().parents:
+                reads.append(path.name)
+            return original(path, *args, **kwargs)
+
+        with patch.object(Path, 'read_text', track), \
+                patch.object(self.backend, 'power_limits', return_value={}), \
+                patch.object(self.backend, 'igpu_clock', return_value={}), \
+                patch.object(self.backend, 'cpu_epp_status', return_value={}):
+            state = self.backend.snapshot()
+        return state['sensors'], reads
+
+    def test_suspended_graphics_devices_are_not_sampled_for_any_vendor(self):
+        for vendor in ('0x1002', '0x8086', '0x10de'):
+            with self.subTest(vendor=vendor):
+                sensors, reads = self.gpu_sensors(vendor, 'suspended')
+                self.assertEqual(sensors, {})
+                self.assertEqual(reads, [])
+
+    def test_active_internal_graphics_telemetry_is_still_sampled(self):
+        sensors, reads = self.gpu_sensors('0x1002', 'active')
+        self.assertEqual(sensors, {'gpu · temp1_input': 50., 'gpu · fan1_input RPM': 1200.})
+        self.assertIn('temp1_input', reads)
+        self.assertIn('fan1_input', reads)
+
+    def test_active_external_graphics_are_not_sampled(self):
+        sensors, reads = self.gpu_sensors('0x1002', 'active', external=True)
+        self.assertEqual(sensors, {})
+        self.assertEqual(reads, [])
 
 
 if __name__ == '__main__':

@@ -1,30 +1,20 @@
 """ROG Control Center style platform-profile EPP settings through asusd D-Bus."""
-import json
 import subprocess
+from .bus import BusClient, OBJECT, PLATFORM as INTERFACE, SERVICE
 
 EPP = ('default', 'performance', 'balance_performance', 'balance_power', 'power')
 PROPERTIES = {'quiet': 'ProfileQuietEpp', 'balanced': 'ProfileBalancedEpp',
               'performance': 'ProfilePerformanceEpp'}
 LINK = 'PlatformProfileLinkedEpp'
-SERVICE = 'xyz.ljones.Asusd'
-OBJECT = '/xyz/ljones'
-INTERFACE = 'xyz.ljones.Platform'
 
 
 class ProfileEpp:
     def __init__(self, runner=subprocess.run):
-        self.runner = runner
-
-    def command(self, *args):
-        result = self.runner(['busctl', '--system', '--json=short', *args],
-                             capture_output=True, text=True, timeout=8)
-        if result.returncode:
-            raise RuntimeError((result.stderr or 'asusd EPP 接口调用失败').strip())
-        return result.stdout
+        self.bus = BusClient(runner, timeout=8, error='asusd EPP 接口调用失败')
 
     def read(self):
-        result = json.loads(self.command('call', SERVICE, OBJECT, 'org.freedesktop.DBus.Properties',
-                                         'GetAll', 's', INTERFACE))
+        result = self.bus.json('call', SERVICE, OBJECT, 'org.freedesktop.DBus.Properties',
+                               'GetAll', 's', INTERFACE)
         properties = result['data'][0]
         linked = properties[LINK]
         if linked['type'] != 'b' or not isinstance(linked['data'], bool):
@@ -45,8 +35,8 @@ class ProfileEpp:
         except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError, IndexError) as error:
             return {'supported': False, 'reason': str(error)}
         try:
-            service = self.runner(['systemctl', 'is-active', 'power-profiles-daemon.service'],
-                                  capture_output=True, text=True, timeout=3)
+            service = self.bus.runner(['systemctl', 'is-active', 'power-profiles-daemon.service'],
+                                      capture_output=True, text=True, timeout=3)
             status['ppd_active'] = service.returncode == 0 and service.stdout.strip() == 'active'
         except (OSError, subprocess.SubprocessError):
             status['ppd_active'] = None
@@ -55,7 +45,7 @@ class ProfileEpp:
     def set_property(self, name, value):
         signature = 'b' if name == LINK else 'u'
         encoded = str(value).lower() if name == LINK else str(EPP.index(value))
-        self.command('set-property', SERVICE, OBJECT, INTERFACE, name, signature, encoded)
+        self.bus.put(OBJECT, INTERFACE, name, signature, encoded)
 
     def save(self, enabled, profiles):
         if type(enabled) is not bool or not isinstance(profiles, dict) or set(profiles) != set(PROPERTIES):

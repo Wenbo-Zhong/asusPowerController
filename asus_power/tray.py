@@ -1,4 +1,4 @@
-"""Optional Ayatana status notifier integrated with the Tk event loop."""
+"""Ayatana status notifier in a separate GTK 3 desktop-session process."""
 import ctypes as C
 
 _CALLBACK = C.CFUNCTYPE(None, C.c_void_p, C.c_void_p)
@@ -71,7 +71,7 @@ class Tray:
 class SessionTray:
     """Keep the indicator on the desktop user's bus when the window is elevated."""
 
-    def __init__(self, root, show, quit_app, uid, isolated=False):
+    def __init__(self, root, show, quit_app, uid):
         import os
         from pathlib import Path
         import pwd
@@ -91,7 +91,7 @@ class SessionTray:
             credentials = dict(user=user.pw_uid, group=user.pw_gid,
                                extra_groups=os.getgrouplist(user.pw_name, user.pw_gid))
         self.process = subprocess.Popen(
-            [sys.executable, str(Path(__file__).resolve()), *(['--glib'] if isolated else [])],
+            [sys.executable, str(Path(__file__).resolve())],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env,
             **credentials)
 
@@ -128,28 +128,13 @@ class SessionTray:
             self.process.terminate()
 
 
-def create_tray(root, show, quit_app):
-    import os
-    uid = os.environ.get('PKEXEC_UID')
-    if os.geteuid() == 0 and uid and int(uid) != 0:
-        return SessionTray(root, show, quit_app, int(uid))
-    return Tray(root, show, quit_app)
-
-
 def run_helper():
     import os
     import sys
 
-    if '--glib' in sys.argv:
-        from desktop_loop import DesktopLoop, GLib
-        loop = GLib.MainLoop()
-        root = DesktopLoop(lambda: 'normal')
-        destroy, mainloop = loop.quit, loop.run
-    else:
-        import tkinter as tk
-        root = tk.Tk()
-        root.withdraw()
-        destroy, mainloop = root.destroy, root.mainloop
+    from desktop_loop import DesktopLoop, GLib
+    loop = GLib.MainLoop()
+    root = DesktopLoop(lambda: 'normal')
 
     def send(message):
         print(message, flush=True)
@@ -167,11 +152,11 @@ def run_helper():
     def parent_input(file, _mask):
         if not os.read(file.fileno(), 4096):
             tray.close()
-            destroy()
+            loop.quit()
 
     root.createfilehandler(sys.stdin, 2, parent_input)
     report()
-    mainloop()
+    loop.run()
 
 
 if __name__ == '__main__':

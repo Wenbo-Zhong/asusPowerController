@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from asus_power.rog_features import AURA, INTERFACE, OBJECT, RogFeatures
+from asus_power.hardware.rog_features import AURA, INTERFACE, OBJECT, RogFeatures
 
 
 class RogFeaturesTests(unittest.TestCase):
@@ -32,3 +32,36 @@ class RogFeaturesTests(unittest.TestCase):
         api.save_supply(desired, ['quiet', 'balanced', 'performance'])
         api.put.assert_any_call(OBJECT, INTERFACE, 'PlatformProfileOnBattery', 'u', 0)
         api.put.assert_called_with(OBJECT, INTERFACE, 'PlatformProfile', 'u', 1)
+
+    def test_saving_rule_does_not_override_a_newer_external_profile(self):
+        api = RogFeatures()
+        before = {'ac': (True, 'performance'), 'battery': (True, 'quiet')}
+        desired = dict(before, battery=(True, 'balanced'))
+        api.supply_rules = Mock(side_effect=[before, desired])
+        api.get = Mock(side_effect=[1, 2, 1])
+        api.put = Mock()
+        api.save_supply(desired, ['quiet', 'balanced', 'performance'])
+        self.assertEqual(len(api.put.call_args_list), 1)
+        api.put.assert_called_once_with(OBJECT, INTERFACE, 'PlatformProfileOnBattery', 'u', 0)
+
+    def test_rule_toggle_alone_does_not_restore_an_external_profile(self):
+        api = RogFeatures()
+        before = {'ac': (True, 'performance'), 'battery': (True, 'quiet')}
+        desired = dict(before, battery=(False, 'quiet'))
+        api.supply_rules = Mock(side_effect=[before, desired])
+        api.get = Mock(side_effect=[1, 2, 1])
+        api.put = Mock()
+        api.save_supply(desired, ['quiet', 'balanced', 'performance'])
+        api.put.assert_called_once_with(
+            OBJECT, INTERFACE, 'ChangePlatformProfileOnBattery', 'b', False)
+
+    def test_power_transition_during_rule_save_keeps_new_source_profile(self):
+        api = RogFeatures()
+        before = {'ac': (True, 'performance'), 'battery': (True, 'quiet')}
+        desired = dict(before, battery=(True, 'balanced'))
+        api.supply_rules = Mock(side_effect=[before, desired])
+        api.get = Mock(return_value=1)
+        api.put = Mock()
+        source = Mock(side_effect=[True, False])
+        api.save_supply(desired, ['quiet', 'balanced', 'performance'], source)
+        api.put.assert_called_once_with(OBJECT, INTERFACE, 'PlatformProfileOnBattery', 'u', 0)

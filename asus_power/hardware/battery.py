@@ -72,12 +72,16 @@ def read_battery(path):
 
     seconds = None
     kind = None
-    if status in ('Charging', 'Discharging') and power is not None and power >= .1:
+    if status in ('Charging', 'Discharging'):
         # Prefer native Wh/W; otherwise Ah/A avoids voltage-conversion errors.
         for quantities, rate in ((energy, power), (charge, current)):
             now, full = quantities['now'], quantities['full']
             if now is None or rate is None or rate <= 0:
                 continue
+            if quantities is energy and rate < .1:
+                break
+            if quantities is charge and power is not None and power < .1:
+                break
             if status == 'Charging':
                 if full is None or full <= 0:
                     continue

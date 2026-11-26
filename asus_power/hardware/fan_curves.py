@@ -1,6 +1,7 @@
 """Lossless asusd fan curves, using the same D-Bus interface as ROG Control Center."""
 import json
 import subprocess
+from .bus import BusClient, OBJECT, SERVICE
 
 PROFILE_IDS = {'balanced': 0, 'performance': 1, 'quiet': 2, 'low-power': 3, 'custom': 4}
 FAN_IDS = {'cpu': 'CPU', 'gpu': 'GPU', 'mid': 'MID'}
@@ -19,15 +20,11 @@ def validate(curve):
 
 class FanCurves:
     def __init__(self, runner=subprocess.run):
-        self.runner = runner
+        self.bus = BusClient(runner, timeout=20, error='风扇曲线接口调用失败')
 
     def call(self, method, signature, *arguments):
-        result = self.runner(['busctl', '--system', '--json=short', 'call', 'xyz.ljones.Asusd',
-                              '/xyz/ljones', 'xyz.ljones.FanCurves', method, signature,
-                              *map(str, arguments)], capture_output=True, text=True, timeout=20)
-        if result.returncode:
-            raise RuntimeError((result.stderr or '风扇曲线接口调用失败').strip())
-        return result.stdout
+        return self.bus.command('call', SERVICE, OBJECT, 'xyz.ljones.FanCurves',
+                                method, signature, *arguments)
 
     def read(self, profile):
         if profile not in PROFILE_IDS:

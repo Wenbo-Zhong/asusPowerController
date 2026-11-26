@@ -1,15 +1,15 @@
 """Read-only discovery and validated, unprivileged asusctl operations."""
 from pathlib import Path
 import os
-import re
 import shutil
 import subprocess
-from .battery import read_battery
-from .profile_epp import ProfileEpp
-from .rog_features import RogFeatures
-from .fan_curves import FanCurves
-from .power_limits import PowerLimits
-from .gpu_scope import external_pci, graphics_device, read_metadata
+from .hardware.battery import read_battery
+from .hardware.profile_epp import ProfileEpp
+from .hardware.rog_features import RogFeatures
+from .hardware.fan_curves import FanCurves
+from .hardware.power_limits import PowerLimits
+from .hardware.power_supply import discover, external_power
+from .hardware.gpu_scope import external_pci, graphics_device, read_metadata
 from .igpu import HELPER, clock_info, find_devices, trusted_helper
 
 
@@ -29,26 +29,6 @@ def number(path, divisor=1):
         return float(read(path)) / divisor
     except (ValueError, TypeError):
         return None
-
-
-def validate_curve(text):
-    parts = text.split(',')
-    if len(parts) != 8:
-        raise ValueError('风扇曲线必须有 8 个温度 / 转速点')
-    points = []
-    for part in parts:
-        match = re.fullmatch(r'\s*(\d+)c:(\d+)%\s*', part)
-        if not match:
-            raise ValueError('格式示例：30c:10%,40c:20%,…（共 8 点）')
-        t, p = map(int, match.groups())
-        if not 20 <= t <= 100 or not 0 <= p <= 100:
-            raise ValueError('温度范围 20–100°C，转速范围 0–100%')
-        if points and (t <= points[-1][0] or p < points[-1][1]):
-            raise ValueError('温度必须递增，转速不得递减')
-        points.append((t, p))
-    if points[-1][0] < 90 or points[-1][1] != 100:
-        raise ValueError('末点必须达到至少 90°C / 100% 转速')
-    return ','.join(f'{t}c:{p}%' for t, p in points)
 
 
 class LinuxBackend:
@@ -73,28 +53,10 @@ class LinuxBackend:
         self.modern = 'battery' in self.version and 'profile' in self.version
 
     def discover_power_supplies(self):
-        self.supplies = sorted((self.root / 'class/power_supply').glob('*'))
-        self.batteries = [p for p in self.supplies if read(p / 'type') == 'Battery'
-                          and read(p / 'present') != '0' and read(p / 'scope') != 'Device']
-        self.battery = next((p for p in self.batteries if (p / 'charge_control_end_threshold').exists()),
-                            self.batteries[0] if self.batteries else None)
+        self.supplies, self.batteries, self.battery = discover(self.root)
 
     def external_power(self):
-        supplies = [(read(path / 'type'), read(path / 'online')) for path in self.supplies
-                    if read(path / 'scope') != 'Device']
-        if ('Mains', '1') in supplies:
-            return True
-
-        status = read(self.battery / 'status') if self.battery is not None else None
-        if status == 'Discharging':
-            # A USB-C source can report an active PD link while the laptop
-            # still runs down its battery.
-            return False
-        if status == 'Charging':
-            return True
-        online = [value for kind, value in supplies if kind not in (None, 'Battery')
-                  and value in ('0', '1')]
-        return '1' in online if online else None
+        return external_power(self.supplies, self.battery)
 
     def command(self, *args):
         if not self.exe:
@@ -145,17 +107,8 @@ class LinuxBackend:
     def power_limits(self):
         return PowerLimits(self.root, self.runner).status()
 
-    def set_power_tuning(self, enabled):
-        return PowerLimits(self.root, self.runner).set_enabled(enabled)
-
-    def set_power_limit(self, name, value=None, reset=False):
-        return PowerLimits(self.root, self.runner).apply(name, value, reset)
-
     def read_fan_curves(self, profile):
         return FanCurves(self.runner).read(profile)
-
-    def save_fan_curve(self, profile, curve):
-        return FanCurves(self.runner).save(profile, curve)
 
     def reset_fan_curves(self, profile):
         return FanCurves(self.runner).defaults(profile)
@@ -232,10 +185,10 @@ class LinuxBackend:
         power_limits = self.power_limits()
         for h in self.hwmon:
             device = graphics_device(h)
-            if device is not None and (external_pci(device) or (
-                    read_metadata(device / 'vendor') == '0x10de'
-                    and (power_limits.get('gpu_block') or
-                         read_metadata(device / 'power/runtime_status') != 'active'))):
+            if device is not None and (external_pci(device)
+                    or read_metadata(device / 'power/runtime_status') != 'active'
+                    or (read_metadata(device / 'vendor') == '0x10de'
+                        and power_limits.get('gpu_block'))):
                 continue
             name = read(h / 'name', h.name)
             for p in sorted(h.glob('temp*_input')):
@@ -282,11 +235,3 @@ class LinuxBackend:
         if not self.modern or not self.led or level not in ('off', 'low', 'med', 'high'):
             raise ValueError('不支持此键盘亮度')
         self.command('leds', 'set', level)
-
-    def set_curve(self, profile, fan, text):
-        if not self.modern or profile not in self.profiles or fan not in self.fans:
-            raise ValueError('该设备不支持此风扇 / 模式')
-        data = validate_curve(text)
-        self.command('fan-curve', '--mod-profile', profile, '--fan', fan, '--data', data)
-        self.command('fan-curve', '--mod-profile', profile, '--fan', fan, '--enable-fan-curve', 'true')
-        return self.command('fan-curve', '--mod-profile', profile)

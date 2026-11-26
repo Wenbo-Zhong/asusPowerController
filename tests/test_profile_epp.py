@@ -1,7 +1,7 @@
 import json
 import subprocess
 import unittest
-from asus_power.profile_epp import EPP, LINK, PROPERTIES, ProfileEpp
+from asus_power.hardware.profile_epp import EPP, LINK, PROPERTIES, ProfileEpp
 
 
 class ProfileEppTests(unittest.TestCase):

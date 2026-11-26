@@ -1,11 +1,10 @@
 from copy import deepcopy
-import os
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from asus_power.combinations import (CombinationApplier, CombinationPolicy, defaults,
-                                     effective, normalized, validate, MODES, SOURCES)
+                                     effective, normalized)
 
 CURVE = {'fan': 'cpu', 'temp': [30, 40, 50, 60, 70, 75, 80, 84],
          'pwm': [0, 20, 40, 80, 110, 150, 200, 254], 'enabled': True}
@@ -144,93 +143,3 @@ class ApplyTests(unittest.TestCase):
             self.api.apply('balanced', 'ac', self.entry)
         self.assertEqual(self.values['ppt_pl1_spl']['current'], 60)
         self.assertEqual(self.curves['cpu'], CURVE)
-
-
-@unittest.skipUnless(os.environ.get('ASUS_RUN_GUI_TESTS') == '1', 'opt-in desktop test')
-class CombinationGuiTests(unittest.TestCase):
-    def tearDown(self):
-        import gc
-        gc.collect()
-
-    def test_six_drafts_and_fans_round_trip_without_hardware_writes(self):
-        import tkinter as tk
-        from asus_power.gui import Application
-        root = tk.Tk()
-        with patch.object(Application, 'submit'), patch.object(Application, 'refresh_theme'), \
-                patch('asus_power.gui.load', return_value={}):
-            app = Application(root)
-            try:
-                backend = Mock()
-                caps = {'model': '测试', 'profiles': list(MODES), 'modern_cli': True,
-                        'charge_limit': False, 'keyboard': False, 'fans': ['cpu'],
-                        'fan_curves': {'supported': True, 'profiles': list(MODES),
-                                      'initial_profile': 'balanced', 'curves': {'cpu': deepcopy(CURVE),
-                                                                             'gpu': dict(deepcopy(CURVE), fan='gpu')}},
-                        'power_limits': {'supported': True, 'enabled': True,
-                            'context': {'profile': 'balanced'}, 'attributes': {
-                                'ppt_pl1_spl': {'label': '处理器持续功率', 'current': 60, 'minimum': 15,
-                                               'maximum': 80, 'step': 5, 'default': 60}}}}
-                app.ready(backend, caps)
-                app.tabs.select(app.combination_page)
-                root.update()
-                panel = app.combination_panel
-                panel.power_rows['ppt_pl1_spl'][0].set(True)
-                panel.power_rows['ppt_pl1_spl'][1].set(40)
-                panel.fan_enabled.set(True)
-                panel.editor.fields[2][1].set('20.0')
-                panel.editor.apply()  # Draft apply must never call the backend.
-                backend.save_fan_curve.assert_not_called()
-                panel.draft['entries']['balanced']['battery']['power']['ppt_pl1_spl'] = 35
-                panel.copy_fans()
-                copied = panel.draft['entries']['balanced']['battery']
-                self.assertEqual(copied['fans']['cpu']['pwm'][2], 51)
-                self.assertEqual(copied['power']['ppt_pl1_spl'], 35)
-                panel.editor.fields[2][1].set('22.0')
-                with patch('asus_power.combination_panel.messagebox.askokcancel', return_value=False) as ask:
-                    panel.copy_fans()
-                    ask.assert_called_once()
-                self.assertEqual(copied['fans']['cpu']['pwm'][2], 51)
-                panel.editor.fields[2][1].set('20.0')
-                panel.editor.apply()
-
-                panel.source.set('离电')
-                panel.switch()
-                panel.source.set('插电')
-                panel.switch()
-                self.assertEqual(panel.power_rows['ppt_pl1_spl'][1].get(), 40)
-                panel.collect()
-                saved = panel.draft
-                self.assertEqual(saved['entries']['balanced']['ac']['fans']['cpu']['pwm'][-1], 254)
-                # Page-level save must commit the selected fan before switching
-                # to edit a second fan; otherwise the first curve gets lost.
-                self.assertFalse(panel.editor.dirty)
-                panel.editor.fan.set('GPU 风扇')
-                with patch('asus_power.fan_editor.messagebox.askokcancel') as ask:
-                    panel.editor.switch_fan()
-                    ask.assert_not_called()
-                panel.editor.fields[2][1].set('21.0')
-                panel.collect()
-                self.assertEqual(panel.draft['entries']['balanced']['ac']['fans']['cpu']['pwm'][2], 51)
-                self.assertEqual(panel.draft['entries']['balanced']['ac']['fans']['gpu']['pwm'][2], 54)
-
-                with patch('asus_power.gui.save') as persist:
-                    panel.save()
-                    self.assertIn('combinations', persist.call_args.args[0])
-                    app.save_policy()
-                    self.assertIn('combinations', persist.call_args.args[0])
-                app.theme.apply('dark')
-                root.geometry(f'{app.px(720)}x{app.px(520)}')
-                root.update()
-                app.open_combination_section(panel.fan_card)
-                root.update()
-                viewport = panel.fan_card.master.master
-                viewport.yview_moveto(1)
-                root.update()
-                self.assertEqual(viewport.yview()[1], 1)
-                self.assertTrue(panel.mode_combo.winfo_viewable())
-                app.open_combination_section(panel.epp_card)
-                root.update()
-                self.assertTrue(panel.epp_card.winfo_viewable())
-                backend.apply_combination.assert_not_called()
-            finally:
-                app.close()

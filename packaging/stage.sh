@@ -4,7 +4,9 @@ set -eu
 root=${1:?usage: stage.sh STAGING_DIRECTORY}
 app="$root/usr/lib/asus-power-controller"
 install -d -m 755 "$app" "$app/asus_power" "$app/scripts" "$root/usr/bin"
-install -m644 asus_power/*.py "$app/asus_power/"
+find asus_power \( -type d \( -name __pycache__ -o -name '.*' \) -prune \) -o \
+    \( -type f ! -name '.*' ! -name '*.pyc' ! -name '*.pyo' \
+       -exec install -Dm644 '{}' "$app/{}" \; \)
 install -m644 scripts/desktop_launcher.py "$app/scripts/"
 install -Dm644 packaging/asus-power-controller.desktop "$root/usr/share/applications/asus-power-controller.desktop"
 cat > "$root/usr/bin/asus-power-controller" <<'WRAPPER'

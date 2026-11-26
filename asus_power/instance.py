@@ -21,7 +21,8 @@ class Instance:
 
     def acquire(self):
         deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
+        replacing = False
+        while replacing or time.monotonic() < deadline:
             with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as candidate:
                 try:
                     candidate.bind(self.address)
@@ -40,8 +41,14 @@ class Instance:
                     if peer_uid(client) not in (self.uid, 0):
                         raise PermissionError('现有实例的用户身份不匹配')
                     client.sendall(self.command)
-                    if client.recv(16) == b'handled':
+                    reply = client.recv(16)
+                    if reply == b'handled':
                         return False
+                    if reply == b'retry' and self.command == b'upgrade':
+                        # The old instance retains its lock while hardware work
+                        # drains. Only a verified upgrade acknowledgement removes
+                        # the normal response deadline.
+                        replacing = True
             except (ConnectionError, TimeoutError):
                 pass
             time.sleep(.05)

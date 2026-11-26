@@ -88,7 +88,13 @@ GPL-3.0-only。参考项目和许可证说明见 [分析文档](docs/COMPARISON.
 
 GTK 4 使用桌面的分辨率缩放和系统字体。libadwaita 跟随系统深浅模式和支持的强调色。卡片及控件采用圆角，首页布局可在硬件检测前显示，等待读数时显示 `--`。
 
-`scripts/with_smooth_tk.py` 仍可运行旧版 Tk 的界面回归测试，正常启动使用 GTK 4。
+桌面界面统一使用 GTK 4，托盘在独立 GTK 3 进程中运行。
+
+## 代码结构
+
+`asus_power/ui/` 保存各页面、风扇编辑器、共享控件和不依赖 GTK 的草稿状态；`ui/controller.py` 负责程序生命周期、后台采样和策略调度。`asus_power/hardware/` 保存硬件探测与 asusd 功能，共用 `BusClient` 处理 D-Bus 命令和 JSON；各功能独立校验、回读及恢复。
+
+`backend.py` 是界面使用的硬件入口，`config.py` 和 `combinations.py` 负责配置与组合策略。独立提权运行的 `igpu.py` 保持单文件，不依赖界面或包内导入。启动器、托盘及配置路径不随界面分文件而改变。DEB / RPM 共用的安装流程递归包含子包，排除缓存和系统隐藏文件。
 
 ## 自适应 CPU EPP
 

@@ -85,7 +85,7 @@ jobs:
             apt-get -s --no-remove install /usr/lib/asus-power-controller/backend/asusctl.deb
           fi
           cd /tmp
-          /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/asus-power-controller"); from asus_power.gtk_ui import launch'
+          /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, "/usr/lib/asus-power-controller"); from asus_power.ui.controller import launch'
       - uses: actions/upload-artifact@v4
         with:
           name: ubuntu-26.04-deb

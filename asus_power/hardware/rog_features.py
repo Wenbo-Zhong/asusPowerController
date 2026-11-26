@@ -1,10 +1,9 @@
 """Additional ROG controls through the installed asusd service."""
-import json
 import re
 import subprocess
 
+from .bus import BusClient, OBJECT, PLATFORM as INTERFACE, SERVICE
 from .fan_curves import PROFILE_IDS
-from .profile_epp import INTERFACE, OBJECT, SERVICE, ProfileEpp
 
 AURA = 'xyz.ljones.Aura'
 POWER_FIELDS = ('启动', '运行', '睡眠', '关机')
@@ -15,18 +14,18 @@ SUPPLY_FIELDS = {
 PROFILE_NAMES = {value: name for name, value in PROFILE_IDS.items()}
 
 
-class RogFeatures(ProfileEpp):
-    """Reuse the system bus transport without bypassing asusd."""
+class RogFeatures:
+    def __init__(self, runner=subprocess.run):
+        self.bus = BusClient(runner, timeout=8, error='asusd ROG 接口调用失败')
 
     def get(self, path, interface, name):
-        return json.loads(self.command('get-property', SERVICE, path, interface, name))['data']
+        return self.bus.get(path, interface, name)
 
     def put(self, path, interface, name, signature, *values):
-        return self.command('set-property', SERVICE, path, interface, name, signature,
-                            *(str(value).lower() if type(value) is bool else str(value) for value in values))
+        return self.bus.put(path, interface, name, signature, *values)
 
     def aura(self):
-        candidates = self.command('--list', 'tree', SERVICE).splitlines()
+        candidates = self.bus.command('--list', 'tree', SERVICE).splitlines()
         for path in candidates:
             if not re.fullmatch(r'/xyz/ljones/aura/[a-zA-Z0-9_]+', path):
                 continue
@@ -90,23 +89,32 @@ class RogFeatures(ProfileEpp):
                 changes.append((toggle, 'b', [old_enabled], [enabled]))
         active = self.get(OBJECT, INTERFACE, 'PlatformProfile')
         source_at_start = current_source() if current_source else None
+        applied_modes = set()
+
+        def record(name, values):
+            if name in {fields[1] for fields in SUPPLY_FIELDS.values()}:
+                applied_modes.update(values)
+
         try:
-            self.apply_changes(OBJECT, INTERFACE, changes, self.supply_rules, desired)
+            self.apply_changes(OBJECT, INTERFACE, changes, self.supply_rules, desired, record)
         finally:
             # asusd applies a changed mode immediately, even for the inactive
             # power source. Preserve the running mode when saving the rule.
             same_source = current_source is None or current_source() == source_at_start
-            if changes and same_source and self.get(OBJECT, INTERFACE, 'PlatformProfile') != active:
+            current = self.get(OBJECT, INTERFACE, 'PlatformProfile') if applied_modes and same_source else active
+            if current != active and current in applied_modes:
                 self.put(OBJECT, INTERFACE, 'PlatformProfile', 'u', active)
                 if self.get(OBJECT, INTERFACE, 'PlatformProfile') != active:
                     raise RuntimeError('供电规则已处理，但原运行模式未能恢复')
         return 'asusd 插拔电源规则已保存'
 
-    def apply_changes(self, path, interface, changes, read, desired):
+    def apply_changes(self, path, interface, changes, read, desired, on_attempt=None):
         attempted = []
         try:
             for name, signature, previous, values in changes:
                 attempted.append((name, signature, previous))
+                if on_attempt:
+                    on_attempt(name, values)
                 self.put(path, interface, name, signature, *values)
             if read() != desired:
                 raise RuntimeError('设置回读不一致')
@@ -114,6 +122,8 @@ class RogFeatures(ProfileEpp):
             failures = []
             for name, signature, values in reversed(attempted):
                 try:
+                    if on_attempt:
+                        on_attempt(name, values)
                     self.put(path, interface, name, signature, *values)
                 except Exception as recovery:
                     failures.append(str(recovery))
@@ -132,5 +142,5 @@ class RogFeatures(ProfileEpp):
         return result
 
     def full_charge(self):
-        self.command('call', SERVICE, OBJECT, INTERFACE, 'OneShotFullCharge')
+        self.bus.command('call', SERVICE, OBJECT, INTERFACE, 'OneShotFullCharge')
         return '已请求一次充满'

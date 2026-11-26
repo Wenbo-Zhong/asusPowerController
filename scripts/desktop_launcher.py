@@ -31,8 +31,6 @@ def authorization_command():
             'DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus'),
         'XDG_CONFIG_HOME': os.environ.get('XDG_CONFIG_HOME') or str(home / '.config'),
     }
-    if os.environ.get('ASUS_POWER_SCALE'):
-        variables['ASUS_POWER_SCALE'] = os.environ['ASUS_POWER_SCALE']
     return [pkexec, '--disable-internal-agent', '/usr/bin/env',
             *(f'{key}={value}' for key, value in variables.items()),
             '/usr/bin/python3', '-I', str(Path(__file__).resolve()), '--authorized']

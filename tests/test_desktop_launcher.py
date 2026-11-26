@@ -1,10 +1,15 @@
 import importlib.util
 import os
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import stat
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 from asus_power.config import save
+from asus_power.__main__ import gtk_fallback_command, main
 
 spec = importlib.util.spec_from_file_location(
     'desktop_launcher', Path(__file__).resolve().parents[1] / 'scripts/desktop_launcher.py')
@@ -44,9 +49,42 @@ class DesktopLauncherTests(unittest.TestCase):
             path = Path(directory) / 'app' / 'settings.json'
             with patch('asus_power.config.os.geteuid', return_value=0), \
                     patch.dict(os.environ, PKEXEC_UID=str(os.getuid())), \
-                    patch('asus_power.config.os.chown') as chown:
+                    patch('asus_power.config.os.fchown') as chown:
+                descriptors = []
+                chown.side_effect = lambda fd, uid, gid: descriptors.append(
+                    (stat.S_ISREG(os.fstat(fd).st_mode), uid, gid))
                 save({'enabled': True}, path)
-                self.assertEqual(chown.call_count, 2)
-                self.assertEqual(chown.call_args_list[0].args[0], path.with_suffix('.tmp'))
-                self.assertEqual(chown.call_args_list[1].args[0], path.parent)
+                self.assertEqual(descriptors, [(True, os.getuid(), os.getgid())])
             self.assertIn('true', path.read_text())
+
+    def test_gtk_fallback_exec_preserves_the_loaded_package_location(self):
+        with patch('sys.argv', ['asus-power-controller', '--start-hidden']), \
+                patch.dict(sys.modules, {'asus_power.ui.controller': None}), \
+                patch('sys.executable', '/fixture/venv/bin/python'), \
+                patch('os.path.isfile', return_value=True), \
+                patch('os.execv', side_effect=SystemExit) as execute:
+            with self.assertRaises(SystemExit):
+                main()
+        command = execute.call_args.args[1]
+        self.assertEqual(command, gtk_fallback_command('/usr/bin/python3', ['--start-hidden']))
+        self.assertEqual(command[-2], str(Path(__file__).resolve().parents[1]))
+
+    def test_gtk_bootstrap_ignores_cwd_and_pythonpath_and_preserves_arguments(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / 'installed package/asus_power'
+            package.mkdir(parents=True)
+            (package / '__init__.py').write_text('')
+            (package / '__main__.py').write_text(
+                'import json,sys; print(json.dumps({"file":__file__,"argv":sys.argv[1:]}))')
+            unrelated = root / 'cwd'
+            unrelated.mkdir()
+            (unrelated / 'asus_power.py').write_text('raise RuntimeError("untrusted cwd")')
+            with patch('asus_power.__main__.__file__', str(package / '__main__.py')):
+                command = gtk_fallback_command(sys.executable, ['--start-hidden'])
+            result = subprocess.run(command, cwd=unrelated,
+                                    env=dict(os.environ, PYTHONPATH=str(unrelated)),
+                                    capture_output=True, text=True, timeout=5, check=True)
+            data = json.loads(result.stdout)
+            self.assertEqual(Path(data['file']), (package / '__main__.py').resolve())
+            self.assertEqual(data['argv'], ['--start-hidden'])

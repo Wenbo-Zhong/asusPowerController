@@ -3,7 +3,7 @@ import subprocess
 import unittest
 from unittest.mock import Mock
 
-from asus_power.firmware import check_bios_updates
+from asus_power.hardware.firmware import check_bios_updates
 from asus_power.keyboard_idle import KeyboardIdle
 
 

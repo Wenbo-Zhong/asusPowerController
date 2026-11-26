@@ -1,13 +1,10 @@
 import math
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from asus_power.battery import read_battery
-from asus_power.battery_panel import formatted_values
+from asus_power.hardware.battery import read_battery, formatted_values
 
 
 class BatteryTests(unittest.TestCase):
@@ -120,55 +117,23 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(formatted_values(data)['power_title'], '充电功率')
         self.assertEqual(data['time_seconds'], 14400)
 
+    def test_charge_based_eta_does_not_require_a_voltage_sensor(self):
+        self.put(status='Discharging', charge_now=3000000, charge_full=5000000,
+                 current_now=-1000000)
+        data = read_battery(self.path)
+        self.assertEqual(data['time_seconds'], 10800)
+        self.assertIsNone(data['power_w'])
+        self.assertIsNone(data['energy_now_wh'])
+        self.put(status='Charging', charge_control_end_threshold=80)
+        data = read_battery(self.path)
+        self.assertEqual(data['time_seconds'], 3600)
+        self.assertEqual(data['time_target_percent'], 80)
+        self.put(current_now=0)
+        self.assertIsNone(read_battery(self.path)['time_seconds'])
 
-@unittest.skipUnless(os.environ.get('ASUS_RUN_GUI_TESTS') == '1', 'opt-in desktop test')
-class BatteryGuiTests(unittest.TestCase):
-    def tearDown(self):
-        import gc
-        gc.collect()
-
-    def test_battery_tab_readings_theme_scroll_and_shared_limit(self):
-        import tkinter as tk
-        from asus_power.gui import Application
-        root = tk.Tk()
-        with patch.object(Application, 'submit'), patch.object(Application, 'refresh_theme'), \
-                patch('asus_power.gui.load', return_value={}):
-            app = Application(root)
-            try:
-                caps = {'model': '测试', 'profiles': ['quiet', 'balanced', 'performance'],
-                        'modern_cli': True, 'charge_limit': True, 'keyboard': False, 'fans': [],
-                        'battery_info': {'present': True, 'limit_percent': 90}}
-                app.ready(SimpleNamespace(capabilities=lambda: caps, snapshot=lambda: {}))
-                app.tabs.select(app.battery_page.master.master)
-                root.update()
-                self.assertEqual(app.limit.get(), 90)
-                panel = app.battery_panel
-                info = {'present': True, 'name': 'BAT1', 'status': 'Discharging',
-                        'capacity_percent': 60, 'health_percent': 87, 'power_w': 15,
-                        'time_seconds': 7200, 'cycle_count': 0, 'limit_percent': 80}
-                panel.refresh(info)
-                root.update()
-                self.assertEqual(panel.variables['health'].get(), '87.0%')
-                self.assertEqual(panel.variables['power_title'].get(), '放电功率')
-                self.assertEqual(panel.variables['time'].get(), '约 2 小时 0 分钟')
-                # Identical polling results must not retrigger Tk variable traces/layout.
-                changed = []
-                panel.variables['power'].trace_add('write', lambda *args: changed.append(1))
-                panel.refresh(dict(info))
-                self.assertEqual(changed, [])
-                app.theme.apply('dark')
-                root.geometry(f'{app.px(720)}x{app.px(520)}')
-                root.update()
-                viewport = app.battery_page.master
-                viewport.yview_moveto(1)
-                root.update()
-                self.assertEqual(viewport.yview()[1], 1)
-                self.assertGreater(viewport.content_height, viewport.winfo_height())
-                panel.refresh({'present': False})
-                self.assertEqual(panel.variables['summary'].get(), '未检测到电池')
-                self.assertEqual(panel.variables['health'].get(), '—')
-            finally:
-                app.close()
+    def test_known_tiny_power_suppresses_charge_based_eta(self):
+        self.put(status='Discharging', charge_now=3000000, current_now=1000000, power_now=50000)
+        self.assertIsNone(read_battery(self.path)['time_seconds'])
 
 
 class BatteryBackendTests(unittest.TestCase):

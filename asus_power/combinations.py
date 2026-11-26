@@ -1,9 +1,10 @@
 """Six independent power-source/profile configurations and transactional apply."""
 from copy import deepcopy
 import json
+from threading import Lock
 from .combination_presets import for_machine
-from .fan_curves import validate as validate_curve, FanCurves
-from .power_limits import ATTRIBUTES, PowerLimits
+from .hardware.fan_curves import validate as validate_curve, FanCurves
+from .hardware.power_limits import ATTRIBUTES, PowerLimits
 
 MODES = ('quiet', 'balanced', 'performance')
 SOURCES = ('ac', 'battery')
@@ -67,17 +68,41 @@ class CombinationPolicy:
     """Apply once per real context/configuration change, not every telemetry tick."""
     def __init__(self):
         self.previous = None
+        self.revision = 0
+        self.lock = Lock()
+
+    @staticmethod
+    def fingerprint(mode, source, entry):
+        return mode, source, json.dumps(entry, sort_keys=True)
+
+    def invalidate(self):
+        with self.lock:
+            self.previous = None
+            self.revision += 1
+
+    def run_pending(self, request, revision, settings, apply):
+        """Discard automatic work that has not started before a newer save/tick."""
+        mode, source, entry = request
+        with self.lock:
+            if (revision != self.revision or not settings.get('enabled')
+                    or self.previous != self.fingerprint(*request)
+                    or effective(settings, mode, source) != entry):
+                return None
+        return apply(mode, source, entry)
 
     def request(self, state, settings):
         if not settings.get('enabled') or state.get('ac') is None or state.get('profile') not in MODES:
-            self.previous = None
+            if self.previous is not None:
+                self.invalidate()
             return None
         mode, source = state['profile'], 'ac' if state['ac'] else 'battery'
         entry = effective(settings, mode, source)
-        fingerprint = (mode, source, json.dumps(entry, sort_keys=True))
-        if fingerprint == self.previous:
-            return None
-        self.previous = fingerprint
+        fingerprint = self.fingerprint(mode, source, entry)
+        with self.lock:
+            if fingerprint == self.previous:
+                return None
+            self.previous = fingerprint
+            self.revision += 1
         return mode, source, entry
 
 

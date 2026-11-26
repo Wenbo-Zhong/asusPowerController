@@ -2,7 +2,9 @@
 import json
 from pathlib import Path
 import subprocess
+from .bus import BusClient, PLATFORM, SERVICE
 from .gpu_scope import external_pci, read_metadata
+from .power_supply import discover, external_power
 
 ATTRIBUTES = {
     'ppt_pl1_spl': '处理器持续功率（SPL / PL1）',
@@ -14,8 +16,6 @@ ATTRIBUTES = {
     'nv_tgp': '独显功率上限（TGP）',
     'nv_dynamic_boost': '独显动态加速功率（Dynamic Boost）',
 }
-SERVICE = 'xyz.ljones.Asusd'
-PLATFORM = 'xyz.ljones.Platform'
 ARMOURY = 'xyz.ljones.AsusArmoury'
 GPU_MANAGER = 'io.github.usb4gpumanager.Manager'
 GPU_MANAGER_PATH = '/io/github/usb4gpumanager/Manager'
@@ -28,18 +28,11 @@ def attribute_unit(name):
 class PowerLimits:
     def __init__(self, root=Path('/sys'), runner=subprocess.run):
         self.root = Path(root)
-        self.runner = runner
+        self.bus = BusClient(runner, timeout=12, error='功率控制接口调用失败')
         self.attributes = self.root / 'class/firmware-attributes/asus-armoury/attributes'
 
-    def command(self, *arguments):
-        result = self.runner(['busctl', '--system', '--json=short', *arguments],
-                             capture_output=True, text=True, timeout=12)
-        if result.returncode:
-            raise RuntimeError((result.stderr or '功率控制接口调用失败').strip())
-        return result.stdout
-
     def get(self, path, interface, property_name):
-        return json.loads(self.command('get-property', SERVICE, path, interface, property_name))['data']
+        return self.bus.get(path, interface, property_name)
 
     def enabled(self):
         value = self.get('/xyz/ljones', PLATFORM, 'EnablePptGroup')
@@ -49,23 +42,21 @@ class PowerLimits:
 
     def context(self):
         profile = (self.root / 'firmware/acpi/platform_profile').read_text().strip()
-        sources = []
-        for path in sorted((self.root / 'class/power_supply').glob('*/online')):
-            sources.append((path.parent.name, path.read_text().strip()))
-        return {'profile': profile, 'sources': sources}
+        supplies, _, battery = discover(self.root)
+        return {'profile': profile, 'ac': external_power(supplies, battery)}
 
     def gpu_block_reason(self):
         try:
-            owner, = json.loads(self.command(
+            owner, = self.bus.json(
                 'call', 'org.freedesktop.DBus', '/org/freedesktop/DBus',
                 'org.freedesktop.DBus', 'NameHasOwner', 's', GPU_MANAGER,
-            ))['data']
+            )['data']
             if type(owner) is not bool:
                 raise ValueError('unknown D-Bus owner state')
             if owner:
-                status, = json.loads(self.command(
+                status, = self.bus.json(
                     'call', GPU_MANAGER, GPU_MANAGER_PATH, GPU_MANAGER + '1', 'GetStatus',
-                ))['data']
+                )['data']
                 enabled = json.loads(status)['automation_enabled']
                 if type(enabled) is not bool:
                     raise ValueError('unknown GPU automation state')
@@ -130,7 +121,7 @@ class PowerLimits:
         if type(enabled) is not bool:
             raise ValueError('无效的功率调节开关')
         context = self.context()
-        self.command('set-property', SERVICE, '/xyz/ljones', PLATFORM, 'EnablePptGroup', 'b', str(enabled).lower())
+        self.bus.put('/xyz/ljones', PLATFORM, 'EnablePptGroup', 'b', enabled)
         if self.context() != context or self.enabled() != enabled:
             raise RuntimeError('电源方案发生变化或功率调节开关回读失败，请重新读取')
         return '已启用当前方案的功率调节' if enabled else '已关闭当前方案的功率调节'
@@ -147,8 +138,7 @@ class PowerLimits:
     def write(self, name, value):
         if name.startswith('nv_') and (reason := self.gpu_block_reason()):
             raise RuntimeError(reason)
-        self.command('set-property', SERVICE, '/xyz/ljones/asus_armoury/' + name,
-                     ARMOURY, 'CurrentValue', 'i', str(value))
+        self.bus.put('/xyz/ljones/asus_armoury/' + name, ARMOURY, 'CurrentValue', 'i', value)
 
     def apply(self, name, value, reset=False):
         if name not in ATTRIBUTES:

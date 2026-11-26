@@ -1,6 +1,7 @@
 import json
 import os
 import pwd
+import secrets
 from pathlib import Path
 
 
@@ -17,19 +18,41 @@ def load(path=None):
 
 
 def save(value, path=None):
-    path = path or config_path()
-    directory_existed = path.parent.exists()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix('.tmp')
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2))
-    # The authenticated desktop launcher shares the initiating user's settings.
-    # Keep new files writable when that user later launches without elevation.
-    if os.geteuid() == 0 and os.environ.get('PKEXEC_UID'):
-        user = pwd.getpwuid(int(os.environ['PKEXEC_UID']))
-        os.chown(temp, user.pw_uid, user.pw_gid)
-        if not directory_existed:
-            os.chown(path.parent, user.pw_uid, user.pw_gid)
-    temp.replace(path)
+    path = Path(path or config_path())
+    data = json.dumps(value, ensure_ascii=False, indent=2)
+    try:
+        path.parent.mkdir(parents=True, mode=0o700)
+        created_directory = True
+    except FileExistsError:
+        created_directory = False
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temp = None
+    try:
+        user = None
+        if os.geteuid() == 0 and os.environ.get('PKEXEC_UID'):
+            user = pwd.getpwuid(int(os.environ['PKEXEC_UID']))
+            if created_directory and os.fstat(directory).st_uid == 0:
+                os.fchown(directory, user.pw_uid, user.pw_gid)
+            if os.fstat(directory).st_uid != user.pw_uid:
+                raise PermissionError('配置目录不属于发起授权的用户')
+        name = f'.{path.name}.{secrets.token_hex(16)}.tmp'
+        descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=directory)
+        temp = name
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as output:
+            output.write(data)
+            output.flush()
+            if user:
+                os.fchown(output.fileno(), user.pw_uid, user.pw_gid)
+            os.fsync(output.fileno())
+        os.replace(temp, path.name, src_dir_fd=directory, dst_dir_fd=directory)
+        temp = None
+    finally:
+        try:
+            if temp is not None:
+                os.unlink(temp, dir_fd=directory)
+        finally:
+            os.close(directory)
 
 
 class Policy:

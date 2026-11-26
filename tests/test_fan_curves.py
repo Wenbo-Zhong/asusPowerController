@@ -1,10 +1,8 @@
 from copy import deepcopy
 import json
-import os
 import subprocess
 import unittest
-from unittest.mock import patch
-from asus_power.fan_curves import FanCurves, validate
+from asus_power.hardware.fan_curves import FanCurves, validate
 
 FACTORY = {'fan': 'cpu', 'pwm': [14, 26, 51, 73, 109, 163, 163, 254],
            'temp': [40, 50, 60, 66, 71, 77, 77, 84], 'enabled': True}
@@ -78,60 +76,3 @@ class FanApiTests(unittest.TestCase):
     def test_restore_defaults_reloads_enabled_state(self):
         data = self.api.defaults('balanced')
         self.assertFalse(data['cpu']['enabled'])
-
-
-@unittest.skipUnless(os.environ.get('ASUS_RUN_GUI_TESTS') == '1', 'opt-in desktop rendering test')
-class FanEditorTests(unittest.TestCase):
-    def tearDown(self):
-        import gc
-        gc.collect()
-
-    def test_graph_and_fields_are_lossless_and_follow_theme(self):
-        import tkinter as tk
-        from types import SimpleNamespace
-        from asus_power.gui import Application, NAMES
-        from asus_power.fan_editor import FanEditor
-        root = tk.Tk()
-        with patch.object(Application, 'submit'), patch.object(Application, 'refresh_theme'), \
-                patch('asus_power.gui.load', return_value={}):
-            app = Application(root)
-        try:
-            info = {'supported': True, 'profiles': ['quiet', 'balanced', 'performance'],
-                    'initial_profile': 'balanced', 'curves': {'cpu': deepcopy(FACTORY)}}
-            editor = FanEditor(app, app.advanced, info, NAMES)
-            app.tabs.select(1)
-            root.update()
-            for index in range(8):
-                self.assertTrue(editor.edit_point(index))
-            self.assertEqual(editor.curve, FACTORY)
-            labels = [editor.canvas.itemcget(item, 'text')
-                      for item in editor.canvas.find_withtag('point-number')]
-            self.assertEqual(sorted(number for label in labels for number in label.split('/')),
-                             list('12345678'))
-            self.assertIn('6/7', labels)
-            x, y = editor.point_xy(5)
-            editor.select_point(SimpleNamespace(x=x, y=y))
-            self.assertEqual(editor.selected, 5)
-            editor.select_point(SimpleNamespace(x=x, y=y))
-            self.assertEqual(editor.selected, 6)
-
-            x, y = editor.point_xy(2)
-            editor.select_point(SimpleNamespace(x=x, y=y))
-            editor.drag_point(SimpleNamespace(x=x + app.px(10), y=y - app.px(10)))
-            validate(editor.curve)
-            self.assertTrue(editor.dirty)
-            with patch('asus_power.fan_editor.messagebox.askokcancel', return_value=False):
-                editor.profile.set('静音')
-                editor.switch_profile()
-            self.assertEqual(editor.profile.get(), '均衡')
-            app.backend = SimpleNamespace(save_fan_curve=lambda *args: {'cpu': deepcopy(FACTORY)})
-            editor.show_curve('balanced', 'cpu')
-            with patch.object(app, 'submit') as submit:
-                editor.apply()
-                submit.call_args.args[0]()
-            self.assertEqual(editor.curve, FACTORY)
-            app.theme.apply('dark', '#ed5b00')
-            root.update()
-            self.assertEqual(editor.canvas.cget('bg'), app.theme.colors['card'])
-        finally:
-            app.close()
