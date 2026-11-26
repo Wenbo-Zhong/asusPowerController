@@ -1,17 +1,16 @@
-"""Battery information and one-shot charging."""
+"""Battery status, charging controls and capacity/device details."""
 from ..hardware.battery import formatted_values
 from .gtk import Gtk
-from .widgets import box, button, card, confirm, label
+from .widgets import ChargeControls, box, button, card, confirm, flow, label
 
 
 class BatteryPage:
-    def __init__(self, controller, page, charge):
+    def __init__(self, controller, page):
         self.controller = controller
         summary = card(page, '电池状态')
         self.summary = label('--', True)
         summary.append(self.summary)
-        metrics = box(True, 12)
-        metrics.set_homogeneous(True)
+        metrics = flow(maximum=4, homogeneous=True)
         summary.append(metrics)
         self.metrics = {}
         for key, title in [('percent', '当前电量'), ('health', '健康度'),
@@ -21,22 +20,24 @@ class BatteryPage:
             value.add_css_class('dashboard-metric')
             metric.append(caption)
             metric.append(value)
-            metrics.append(metric)
+            metrics.insert(metric, -1)
             self.metrics[key] = caption, value
         self.note = label('', True)
         summary.append(self.note)
+        charging = card(page, '充电上限')
+        self.charge = ChargeControls(controller, charging)
+        self.full_charge = button('一次充满', self.one_shot_charge)
+        self.full_charge.set_sensitive(False)
+        self.full_charge.set_halign(Gtk.Align.START)
+        charging.append(self.full_charge)
         self.values = {}
-        grids = box(True, 24)
-        grids.set_homogeneous(True)
-        card(page, '容量与设备信息').append(grids)
         groups = [
             [('当前能量', 'energy'), ('满充能量', 'full'), ('设计能量', 'design'),
              ('满充电荷量', 'charge_full'), ('设计电荷量', 'charge_design')],
             [('当前电压', 'voltage'), ('充放电电流', 'current'), ('制造商', 'manufacturer'),
              ('型号', 'model'), ('电池类型', 'technology')]]
-        for group in groups:
-            column = box()
-            grids.append(column)
+        for title, group in zip(('容量信息', '设备信息'), groups):
+            column = card(page, title)
             for name, key in group:
                 row = box(True)
                 caption = label(name, True)
@@ -48,17 +49,13 @@ class BatteryPage:
                 row.append(value)
                 column.append(row)
                 self.values[key] = value
-        charging = card(page, '充电上限')
-        charge.append(charging)
-        self.full_charge = button('一次充满', self.one_shot_charge)
-        self.full_charge.set_sensitive(False)
-        self.full_charge.set_halign(Gtk.Align.START)
-        charging.append(self.full_charge)
 
     def ready(self, caps):
+        self.charge.ready(caps)
         self.full_charge.set_sensitive(caps['charge_limit'])
 
     def refresh(self, state):
+        self.charge.refresh(state['limit'])
         battery = formatted_values(state.get('battery_info') or {})
         self.summary.set_label(battery['summary'])
         self.note.set_label(battery['note'])

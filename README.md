@@ -31,7 +31,7 @@ asus-power-controller
 
 GitHub Actions 的 **Build Linux packages** 会在 PR、main/master 推送、版本标签和手动运行时生成安装包。下载对应运行记录里的 `ubuntu-26.04-deb` 或 `fedora-44-rpm` 构建产物。包版本来自 `pyproject.toml`。
 
-- Ubuntu 26.04 可安装 Actions 生成的界面 DEB。带后端的 `amd64` 版本在「日常设置 → 启动与托盘」提供「安装后端服务」。确认授权后，应用用 APT 安装内部的 `asusctl` 包、刷新服务并启动 `asusd`。同路径的源码安装程序会由包管理器接管，`/etc/asusd` 中的配置会保留。安装成功后退出托盘并重新打开应用以刷新硬件能力。
+- Ubuntu 26.04 可安装 Actions 生成的界面 DEB。带后端的 `amd64` 版本在「设置 → 启动与托盘」提供「安装后端服务」。确认授权后，应用用 APT 安装内部的 `asusctl` 包、刷新服务并启动 `asusd`。同路径的源码安装程序会由包管理器接管，`/etc/asusd` 中的配置会保留。安装成功后退出托盘并重新打开应用以刷新硬件能力。
 - Fedora 44 在启用提供 `asusctl` 的 Terra 仓库后，用 `sudo dnf install ./asus-power-controller-0.1.0-1.fc44.noarch.rpm` 安装。RPM 声明了 `asusctl` 依赖。 [上游 Fedora 指南](https://opengamingcollective.github.io/asusctl/distributions/fedora.html)
 
 更新 Ubuntu 后端时，在主分支运行 **Build asusctl backend**，输入上游的完整提交 SHA。它只编译后端程序并上传 DEB、对应源码及 Cargo.lock。成功后会自动触发 **Build Linux packages**，把同一次构建的后端包嵌进界面 DEB。只修改界面时可以手动提供 `backend_run_id`，也可以把仓库变量 `ASUSCTL_BACKEND_RUN_ID` 设为可下载的后端运行 ID，让主分支后续构建复用它。后端产物保留 90 天。未选定后端产物的 DEB 可搭配系统上已有的 asusctl/asusd。
@@ -48,15 +48,16 @@ sh packaging/build.sh deb dist dist-backend/asusctl_VERSION_amd64.deb
 ## 已实现
 
 - 圆角卡片与控件，深浅主题跟随系统的桌面界面；异步读取和命令执行。
-- 「日常设置 → 启动与托盘」可设置登录自启动。关窗后继续在托盘运行，托盘菜单可彻底退出。登录自启动使用普通用户权限。
+- 四个主标签：「概览」查看状态和立即切换运行方式；「性能与散热」集中实时状态、模式联动、功耗和风扇；「电池」管理充电及查看容量、设备信息；「设置」管理启动、键盘灯光和 BIOS。
+- 「设置 → 启动与托盘」可设置登录自启动。关窗后继续在托盘运行，托盘菜单可彻底退出。登录自启动使用普通用户权限。
 - 自动发现性能模式，手动切换并回读实际状态。
-- [六套组合策略](docs/COMBINATIONS.md)：省电／均衡／性能 × 插电／离电，独立保存功耗和风扇设置，程序运行时自动联动，包括收进托盘后。
+- [六套组合策略](docs/COMBINATIONS.md)：静音／均衡／性能 × 插电／离电，在「性能与散热 → 功耗／风扇」共用编辑对象，独立保存功耗和风扇设置，程序运行时自动联动，包括收进托盘后。
 - 发现电池及 USB-C/交流供电，设置充电上限并回读。
-- 「电池信息」页显示健康度、充放电功率、按当前充电上限估算的时间、满充／设计容量及电池型号；兼容只提供电流和电荷量的电池。
+- 「电池」页显示健康度、充放电功率、按当前充电上限估算的时间、满充／设计容量及电池型号；兼容只提供电流和电荷量的电池。
 - 每 3 秒读取温度、风扇转速、电量及可用电池功率；不调用 nvidia-smi 唤醒独显。
 - 可保存的接电 / 电池性能策略，默认关闭，在程序运行期间生效，包括收进托盘后。每次供电状态变化只自动切换一次，平时以桌面或应用手动选的模式为准。启动与修改策略只记录当前供电，下一次插拔电才触发。
-- 支持时可调节键盘亮度、编辑并启用 8 点风扇曲线。GNOME 下可在「键盘的光 → 闲置熄灯」分别设置插电和离电的超时，恢复活动时还原亮度，收进托盘后继续生效。
-- 「日常设置 → BIOS」显示当前 DMI 版本，可通过可选的系统组件 `fwupd` 检查系统 BIOS 更新。界面只检查，ASUS 支持页面可用于查找对应机型的 EZ Flash 固件。
+- 支持时可调节键盘亮度、编辑并启用 8 点风扇曲线。GNOME 下可在「设置 → 键盘灯光 → 闲置熄灯」分别设置插电和离电的超时，恢复活动时还原亮度，收进托盘后继续生效。
+- 「设置 → BIOS」显示当前 DMI 版本，可通过可选的系统组件 `fwupd` 检查系统 BIOS 更新。界面只检查，ASUS 支持页面可用于查找对应机型的 EZ Flash 固件。
 - 设备支持信息与错误显示。不支持的控制灰显；未知遥测显示 `—`。
 
 配置位于 `$XDG_CONFIG_HOME/asus-power-controller/settings.json`，默认 `~/.config/asus-power-controller/settings.json`。若已保存启用的自动策略，下次启动会恢复并应用它。退出后停止监测和策略，但已写入硬件/asusd 的设置不会自动撤销。
@@ -67,9 +68,9 @@ sh packaging/build.sh deb dist dist-backend/asusctl_VERSION_amd64.deb
 
 暂无 Windows 后端、GPU 切换、RGB 动画或热键。仅支持已检测到现代子命令结构的 asusctl，未完成跨版本验收。asusd 的自身自动策略可能与本项目策略相互覆盖。CLI 通过系统现有 D-Bus 授权操作，权限不足会显示原始错误；应用默认以普通用户启动，安装或执行核显频率控制时按需授权。「启动与托盘」可选择从桌面快捷方式打开时提前授权，该偏好在更改时保存。登录自启仍以普通用户运行。
 
-风扇编辑器读取 asusd 保存的真实曲线，支持按方案选择 CPU、GPU、第三风扇，拖动 8 个点或在表格中输入数值。重复温度点及原始 0–255 PWM 字节会保留，界面以百分比显示。启用状态和曲线通过单个 SetFanCurve 调用提交并回读验证。失败时尝试恢复原曲线，恢复失败会显示错误。未应用的编辑在切换前会提示确认。
+风扇编辑器读取 asusd 保存的真实曲线，支持按方案选择 CPU、GPU、第三风扇，拖动 8 个点或在表格中输入数值。重复温度点及原始 0–255 PWM 字节会保留，界面以百分比显示。启用状态和曲线通过单个 SetFanCurve 调用提交并回读验证。失败时尝试恢复原曲线，恢复失败会显示错误。切换编辑对象会保留草稿，退出前需点击「保存六套配置」。
 
-「恢复此方案默认」影响所选方案的全部风扇，确认后调用 asusd 的 SetCurvesToDefaults 并重新读取。该操作可能由 asusd 暂时切换硬件方案以读取原厂曲线。百分比表示风扇输出比例，实际转速显示在实时 RPM 栏。
+「恢复原厂曲线」影响所选方案的全部风扇，确认后调用 asusd 的 SetCurvesToDefaults 并重新读取。该操作可能由 asusd 暂时切换硬件方案以读取原厂曲线。百分比表示风扇输出比例，实际转速显示在实时 RPM 栏。
 
 实现参考 ROG Control Center 的 [setup_fans.rs](https://github.com/OpenGamingCollective/asusctl/blob/main/rog-control-center/src/ui/setup_fans.rs) 和 CurveData 的 D-Bus 数据格式，复用 asusd 服务接口。编辑器使用 GTK 和系统字体，跟随深浅主题及系统强调色。
 
@@ -86,13 +87,13 @@ GPL-3.0-only。参考项目和许可证说明见 [分析文档](docs/COMPARISON.
 
 ## 显示与主题
 
-GTK 4 使用桌面的分辨率缩放和系统字体。libadwaita 跟随系统深浅模式和支持的强调色。卡片及控件采用圆角，首页布局可在硬件检测前显示，等待读数时显示 `--`。
+GTK 4 使用桌面的分辨率缩放和系统字体。libadwaita 跟随系统深浅模式和支持的强调色。卡片及控件采用圆角，页面统一限制内容宽度；指标、操作按钮和风扇表格在窄窗口下自动换行。首页布局可在硬件检测前显示，等待读数时显示 `--`。
 
 桌面界面统一使用 GTK 4，托盘在独立 GTK 3 进程中运行。
 
 ## 代码结构
 
-`asus_power/ui/` 保存各页面、风扇编辑器、共享控件和不依赖 GTK 的草稿状态；`ui/controller.py` 负责程序生命周期、后台采样和策略调度。`asus_power/hardware/` 保存硬件探测与 asusd 功能，共用 `BusClient` 处理 D-Bus 命令和 JSON；各功能独立校验、回读及恢复。
+`asus_power/ui/` 保存各页面、风扇编辑器、共享控件和不依赖 GTK 的草稿状态；`ui/controller.py` 负责程序生命周期、后台采样和策略调度。`performance_page.py` 组合实时状态、`mode_settings.py` 的模式联动和 `combination_editor.py` 的功耗／风扇草稿；`settings_page.py` 管理启动、灯光与 BIOS。`asus_power/hardware/` 保存硬件探测与 asusd 功能，共用 `BusClient` 处理 D-Bus 命令和 JSON；各功能独立校验、回读及恢复。
 
 `backend.py` 是界面使用的硬件入口，`config.py` 和 `combinations.py` 负责配置与组合策略。独立提权运行的 `igpu.py` 保持单文件，不依赖界面或包内导入。启动器、托盘及配置路径不随界面分文件而改变。DEB / RPM 共用的安装流程递归包含子包，排除缓存和系统隐藏文件。
 
@@ -122,7 +123,7 @@ journalctl -u asus-power-epp.service -f
 
 ## 核显最高频率
 
-在「散热调节」页设置 MHz 上限，页面显示当前频率、现有上限和调频模式。首次使用点击「安装核显控制组件…」完成系统管理员授权，之后点击「应用」或「恢复自动调频」时也会请求授权。
+在「性能与散热 → 实时状态」设置核显 MHz 上限，页面显示当前频率、现有上限和调频模式。首次使用点击「安装控制组件」完成系统管理员授权，之后点击「应用」或「恢复自动调频」时也会请求授权。
 
 当前支持已识别的 AMD Strix Point 核显（PCI ID `1002:150e`），本机驱动提供 600–2900 MHz 范围。应用上限后使用驱动的 manual 模式，恢复自动调频会重置原厂 SCLK 范围并切回 auto。上下限以驱动实际报告为准。
 
@@ -132,7 +133,7 @@ journalctl -u asus-power-epp.service -f
 
 ## 按电源方案联动 EPP
 
-「组合策略 → EPP」采用 ROG Control Center 的方案。通过 asusd D-Bus 的 `PlatformProfileLinkedEpp`、`ProfileQuietEpp`、`ProfileBalancedEpp`、`ProfilePerformanceEpp` 属性保存联动开关与三种方案的偏好。规则由 asusd 保存并在后台随平台方案应用，关闭本应用后仍然有效。界面显示每个 CPUFreq policy 实际报告的 EPP 和调速器，多个不同值会一起列出。选项包括固件默认和四种命名预设。
+「性能与散热 → 模式联动」采用 ROG Control Center 的 EPP 方案。通过 asusd D-Bus 的 `PlatformProfileLinkedEpp`、`ProfileQuietEpp`、`ProfileBalancedEpp`、`ProfilePerformanceEpp` 属性保存联动开关与三种方案的偏好。插电和离电共用规则，点击「保存 EPP 规则」独立保存；「保存六套配置」只保存功耗和风扇。规则由 asusd 保存并在后台随平台方案应用，关闭本应用后仍然有效。界面显示每个 CPUFreq policy 实际报告的 EPP 和调速器，多个不同值会一起列出。选项包括固件默认和四种命名预设。
 
 Linux 的 EPP 策略取决于驱动及系统电源管理器。驱动提供 EPP 接口，硬件按偏好和负载调节频率，power-profiles-daemon、asusd 等服务可按电源方案设置这些偏好。[内核文档](https://docs.kernel.org/admin-guide/pm/amd-pstate.html)
 
@@ -143,9 +144,9 @@ Linux 的 EPP 策略取决于驱动及系统电源管理器。驱动提供 EPP �
 
 ## 功率设置
 
-「功率设置」页提供处理器 SPL/PL1、SPPT/PL2、FPPT/PL3，以及设备支持的 APU/平台功率、独显 TGP 和 Dynamic Boost。每项的当前值、范围、步长和默认值均从 asus-armoury 固件属性读取。
+「性能与散热 → 功耗」提供处理器 SPL/PL1、SPPT/PL2、FPPT/PL3，以及设备支持的 APU/平台功率、独显 TGP 和 Dynamic Boost。每项的当前值、范围、步长和默认值均从 asus-armoury 固件属性读取。
 
-先勾选「启用当前方案的功率调节」，再逐项填写瓦数并应用。启用开关会应用 asusd 已保存的当前性能方案和供电状态对应配置。每项可恢复固件默认值。
+选择运行方式和供电对应的草稿，勾选要管理的功耗项并填写数值。点击「填入默认值」只修改草稿；「保存六套配置」保存所有功耗与风扇草稿；「应用当前草稿」要求所选组合与实际状态一致。勾选并保存「自动联动功耗与风扇」后，应用在运行期间随状态变化提交对应配置。
 
 应用通过 asusd D-Bus 提交，随后读取驱动的 current_value 验证。独显休眠时若服务返回待应用值，界面显示「待应用」，并与实际当前值分开显示。期间切换电源或性能方案时会中止并提示重新读取，避免向新方案回写旧值。应用失败时尝试恢复原值，无法确认恢复时明确显示错误。
 

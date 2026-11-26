@@ -12,6 +12,14 @@ def box(horizontal=False, spacing=10):
                    spacing=spacing)
 
 
+def flow(maximum=3, homogeneous=False):
+    widget = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, homogeneous=homogeneous,
+                         row_spacing=8, column_spacing=12, min_children_per_line=1,
+                         max_children_per_line=maximum, activate_on_single_click=False)
+    widget.add_css_class('dashboard-flow')
+    return widget
+
+
 def label(text='--', subdued=False):
     widget = Gtk.Label(label=text, xalign=0, wrap=True)
     if subdued:
@@ -41,7 +49,7 @@ def dropdown(items):
 def scroll(content):
     view = Gtk.ScrolledWindow(vexpand=True)
     view.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-    view.set_child(content)
+    view.set_child(Adw.Clamp(child=content, maximum_size=840, tightening_threshold=620))
     return view
 
 
@@ -51,7 +59,8 @@ def card(parent, title):
     heading = label(title)
     heading.add_css_class('dashboard-heading')
     result.append(heading)
-    parent.append(result)
+    if parent is not None:
+        parent.append(result)
     return result
 
 
@@ -60,39 +69,32 @@ def fmt(value, unit=''):
 
 
 class ChargeControls:
-    def __init__(self, controller):
+    def __init__(self, controller, parent):
         self.controller = controller
-        self.buffer = Gtk.EntryBuffer.new('--', 2)
-        self.controls = []
-
-    def append(self, parent):
         row = box(True)
         parent.append(row)
-        entry = Gtk.Entry(buffer=self.buffer, width_chars=5)
-        row.append(entry)
+        self.entry = Gtk.Entry(text='--', width_chars=5)
+        row.append(self.entry)
         row.append(label('%'))
 
         def apply():
             try:
-                value = int(entry.get_text())
+                value = int(self.entry.get_text())
             except ValueError:
                 self.controller.status.set_label('请输入 20–100 的整数')
                 return
             self.controller.submit(lambda: self.controller.backend.set_limit(value))
 
-        action = button('保存上限', apply)
-        row.append(action)
-        entry.set_sensitive(False)
-        action.set_sensitive(False)
-        self.controls.append((entry, action))
+        self.action = button('保存上限', apply)
+        row.append(self.action)
+        self.entry.set_sensitive(False)
+        self.action.set_sensitive(False)
 
     def ready(self, caps):
         enabled = caps['charge_limit'] and caps['modern_cli']
-        for pair in self.controls:
-            for widget in pair:
-                widget.set_sensitive(enabled)
+        for widget in (self.entry, self.action):
+            widget.set_sensitive(enabled)
 
     def refresh(self, value):
-        if self.buffer.get_text() == '--' and value is not None:
-            text = str(int(value))
-            self.buffer.set_text(text, len(text))
+        if self.entry.get_text() == '--' and value is not None:
+            self.entry.set_text(str(int(value)))

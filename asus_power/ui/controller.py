@@ -10,11 +10,11 @@ from ..instance import Instance
 from ..keyboard_idle import KeyboardIdle
 from ..tray import SessionTray
 from .battery_page import BatteryPage
-from .combination_editor import CombinationEditor
-from .cooling_page import CoolingPage
 from .gtk import Adw, Gdk, Gio, GLib, Gtk
-from .overview_page import LIGHT_TIMEOUTS, OverviewPage
-from .widgets import ChargeControls, box, label, scroll
+from .overview_page import OverviewPage
+from .performance_page import PerformancePage
+from .settings_page import LIGHT_TIMEOUTS, SettingsPage
+from .widgets import box, label, scroll
 
 
 class Controller:
@@ -55,6 +55,7 @@ class Controller:
             .dashboard-metric { font-weight: 700; font-size: 1.3em; }
             .dashboard-value { font-feature-settings: "tnum"; }
             .dashboard-status { padding: 6px 24px 12px; }
+            .dashboard-flow > flowboxchild { padding: 0; }
         """)
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
@@ -75,19 +76,19 @@ class Controller:
         self.status.add_css_class('dashboard-status')
         content.append(self.status)
         pages = {}
-        for name, title in [('overview', '日常设置'), ('cooling', '散热调节'),
-                            ('battery', '电池信息'), ('combination', '组合策略')]:
+        for name, title in [('overview', '概览'), ('performance', '性能与散热'),
+                            ('battery', '电池'), ('settings', '设置')]:
             page = box()
-            page.add_css_class('dashboard-page')
             pages[name] = page
-            self.stack.add_titled(page if name == 'combination' else scroll(page), name, title)
-        self.charge = ChargeControls(self)
-        self.overview = OverviewPage(self, pages['overview'], self.charge)
-        self.cooling = CoolingPage(self, pages['cooling'])
-        self.battery = BatteryPage(self, pages['battery'], self.charge)
-        self.combination = CombinationEditor(self, pages['combination'])
+            if name != 'performance':
+                page.add_css_class('dashboard-page')
+            self.stack.add_titled(page if name == 'performance' else scroll(page), name, title)
+        self.overview = OverviewPage(self, pages['overview'])
+        self.performance = PerformancePage(self, pages['performance'])
+        self.battery = BatteryPage(self, pages['battery'])
+        self.settings_page = SettingsPage(self, pages['settings'])
         if preset_error:
-            self.combination.note.set_label('旧组合无法读取：' + preset_error)
+            self.performance.editor.note.set_label('旧组合无法读取：' + preset_error)
         if not start_hidden:
             self.window.present()
         self.submit(self.detect, self.ready)
@@ -181,10 +182,8 @@ class Controller:
     def ready(self, result):
         self.backend, self.caps = result
         self.mode_keys = self.caps['profiles']
-        self.charge.ready(self.caps)
-        for page in (self.overview, self.cooling, self.battery):
+        for page in (self.overview, self.performance, self.battery, self.settings_page):
             page.ready(self.caps)
-        self.combination.populate(self.caps)
         self.status.set_label('准备好了')
         self.tick()
 
@@ -195,8 +194,7 @@ class Controller:
 
     def update(self, state):
         self.state = state
-        self.charge.refresh(state['limit'])
-        for page in (self.overview, self.cooling, self.battery, self.combination):
+        for page in (self.overview, self.performance, self.battery):
             page.refresh(state)
         ac, profile = state['ac'], state['profile']
         mode = self.policy.target(ac, self.settings)
@@ -234,7 +232,7 @@ class Controller:
                 return '当前会话无法检测闲置时间或控制键盘灯。'
             return '恢复键盘或鼠标活动时会还原亮度。'
 
-        self.submit(update, self.overview.keyboard_note.set_label,
+        self.submit(update, self.settings_page.keyboard_note.set_label,
                     finished=lambda: setattr(self, 'keyboard_busy', False))
 
 

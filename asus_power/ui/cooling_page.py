@@ -1,20 +1,19 @@
 """Temperature, fan telemetry and validated APU controls."""
 from .gtk import Gtk
-from .widgets import box, button, card, fmt, label
+from .widgets import box, button, card, flow, fmt, label
 
 
 class CoolingPage:
     def __init__(self, controller, page):
         self.controller = controller
         readings = card(page, '实时温度与转速')
-        columns = box(True, 24)
-        columns.set_homogeneous(True)
+        columns = flow(maximum=2, homogeneous=True)
         readings.append(columns)
         self.sensor_columns = {}
         self.sensor_rows = {'temperature': {}, 'fan': {}}
         for key, heading in [('temperature', '温度'), ('fan', '风扇转速')]:
             column = box(spacing=6)
-            columns.append(column)
+            columns.insert(column, -1)
             column.append(label(heading, True))
             values = box(spacing=6)
             values.append(label())
@@ -31,11 +30,13 @@ class CoolingPage:
         self.gpu_target = Gtk.Entry(text='--', width_chars=7)
         row.append(self.gpu_target)
         row.append(label('MHz'))
+        actions = flow()
+        gpu.append(actions)
         self.gpu_apply = button('应用', self.apply_gpu)
         self.gpu_reset = button('恢复自动调频', lambda: self.gpu_operation(controller.backend.set_igpu_max))
         self.gpu_install = button('安装控制组件', lambda: self.gpu_operation(controller.backend.install_igpu_helper))
         for widget in (self.gpu_apply, self.gpu_reset, self.gpu_install):
-            row.append(widget)
+            actions.insert(widget, -1)
             widget.set_sensitive(False)
         self.gpu_target.set_sensitive(False)
         self.gpu_busy = False
@@ -72,8 +73,7 @@ class CoolingPage:
         self.refresh_gpu(state.get('igpu_clock', {}))
 
     def show_fans(self):
-        self.controller.stack.set_visible_child_name('combination')
-        self.controller.combination.sections.set_visible_child_name('fans')
+        self.controller.performance.show_fans()
 
     def apply_gpu(self):
         try:

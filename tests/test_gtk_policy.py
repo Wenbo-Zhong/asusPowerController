@@ -26,7 +26,8 @@ def controller_types():
     # Keep fake GI imports scoped to this fixture, including all split views.
     with patch.dict(sys.modules, modules):
         module = importlib.import_module('asus_power.ui.controller')
-    return module.Controller, module.CombinationEditor
+        editor = importlib.import_module('asus_power.ui.combination_editor')
+    return module.Controller, editor.CombinationEditor
 
 
 class GtkPolicyTests(unittest.TestCase):
@@ -42,11 +43,9 @@ class GtkPolicyTests(unittest.TestCase):
         c.policy = Policy()
         c.settings = {}
         c.backend = SimpleNamespace(apply_combination=Mock(), modern=True)
-        c.charge = SimpleNamespace(refresh=Mock())
         c.overview = SimpleNamespace(refresh=Mock())
         c.battery = SimpleNamespace(refresh=Mock())
-        c.cooling = SimpleNamespace(refresh=Mock())
-        c.combination = SimpleNamespace(refresh=Mock())
+        c.performance = SimpleNamespace(refresh=Mock())
         c.mode_keys = ['quiet', 'balanced', 'performance']
         c.persist = Mock(return_value=True)
         self.state = {'ac': True, 'profile': 'balanced', 'battery': None, 'limit': None,

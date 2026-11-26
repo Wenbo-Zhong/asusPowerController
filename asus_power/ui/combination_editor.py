@@ -1,98 +1,66 @@
-"""GTK editor for six supply/profile drafts and asusd EPP rules."""
+"""Power and fan editors sharing six supply/profile drafts."""
 from copy import deepcopy
 
 from ..combinations import MODES, effective
 from ..hardware.power_limits import attribute_unit
-from ..hardware.profile_epp import EPP
 from .curve_editor import CurveEditor
 from .drafts import CombinationDraft
 from .gtk import Gtk
-from .widgets import EPP_NAMES, MODENAMES, box, button, card, confirm, dropdown, label, scroll
+from .widgets import MODENAMES, box, button, card, confirm, dropdown, flow, label
 
 
 class CombinationEditor:
-    def __init__(self, controller, page):
+    def __init__(self, controller):
         self.controller = controller
         self.model = CombinationDraft(controller.combinations)
         self.loading = False
         self.busy = False
         self.power_rows = {}
-        self.epp_choices = []
-        header = card(page, '编辑组合')
-        row = box(True)
-        header.append(row)
-        self.mode = dropdown(['省电', '均衡', '性能'])
+        self.header = card(None, '编辑功耗与风扇')
+        self.header.append(label('选择草稿不会切换电脑的运行方式或供电；应用时必须与当前实际状态一致。', True))
+        selectors = flow(maximum=2, homogeneous=True)
+        self.header.append(selectors)
+        self.mode = dropdown([MODENAMES[mode] for mode in MODES])
         self.mode.set_selected(1)
         self.source = dropdown(['插电', '离电'])
-        for item in (self.mode, self.source):
-            row.append(item)
-        spacer = box()
-        spacer.set_hexpand(True)
-        row.append(spacer)
-        row.append(button('应用此组合', self.apply))
-        save_button = button('保存全部配置', self.save)
+        for title, item in (('运行方式', self.mode), ('供电', self.source)):
+            group = box(True)
+            group.append(label(title, True))
+            item.set_hexpand(True)
+            group.append(item)
+            selectors.insert(group, -1)
+        actions = flow(maximum=2)
+        self.header.append(actions)
+        actions.insert(button('应用当前草稿', self.apply), -1)
+        save_button = button('保存六套配置', self.save)
         save_button.add_css_class('suggested-action')
-        row.append(save_button)
-        self.enabled = Gtk.CheckButton(label='自动联动（保存后生效）', active=self.model.settings['enabled'])
-        state_row = box(True)
-        header.append(state_row)
-        self.enabled.set_hexpand(True)
-        state_row.append(self.enabled)
-        self.live = label('当前组合 --', True)
-        state_row.append(self.live)
+        actions.insert(save_button, -1)
+        self.enabled = Gtk.CheckButton(label='自动联动功耗与风扇（保存后生效）',
+                                       active=self.model.settings['enabled'])
+        self.header.append(self.enabled)
+        self.live = label('电脑当前 --', True)
+        self.header.append(self.live)
         self.note = label('', True)
-        header.append(self.note)
-        self.sections = Gtk.Stack(vexpand=True, hhomogeneous=False)
-        page.append(Gtk.StackSwitcher(stack=self.sections, halign=Gtk.Align.CENTER))
-        page.append(self.sections)
-        for key, title in [('epp', 'EPP'), ('power', '功耗'), ('fans', '风扇')]:
+        self.header.append(self.note)
+        for key, title in [('power', '当前草稿的功耗'), ('fans', '当前草稿的风扇曲线')]:
             content = box()
-            self.sections.add_titled(scroll(content), key, title)
-            setattr(self, key + '_card', card(content, {'epp': 'asusd 模式联动',
-                                                       'power': '此组合的功耗',
-                                                       'fans': '此组合的风扇曲线'}[key]))
-        self.epp_live = label('实际 EPP -- · 调速器 --', True)
-        self.epp_card.append(self.epp_live)
-        self.epp_linked = Gtk.CheckButton(label='随方案切换 EPP')
-        self.epp_card.append(self.epp_linked)
-        columns = box(True)
-        columns.set_homogeneous(True)
-        self.epp_card.append(columns)
-        for mode in MODES:
-            group = box()
-            columns.append(group)
-            group.append(label(MODENAMES[mode]))
-            choice = dropdown(EPP_NAMES)
-            group.append(choice)
-            self.epp_choices.append(choice)
-        self.epp_save = button('保存 asusd 规则', self.save_epp)
-        self.epp_card.append(self.epp_save)
-        self.epp_card.set_sensitive(False)
+            setattr(self, key + '_page', content)
+            setattr(self, key + '_card', card(content, title))
         self.power_empty = label('--', True)
         self.power_card.append(self.power_empty)
         self.fan = CurveEditor(self.fans_card)
-        fan_actions = box(True)
-        fan_actions.append(button('读取方案曲线', self.read_curves))
-        fan_actions.append(button('复制到另一种供电', self.copy_curves))
+        fan_actions = flow()
+        fan_actions.insert(button('读取方案曲线', self.read_curves), -1)
+        fan_actions.insert(button('复制到另一种供电', self.copy_curves), -1)
         self.reset_fans = button('恢复原厂曲线', self.restore_curves)
         self.reset_fans.set_sensitive(False)
-        fan_actions.append(self.reset_fans)
+        fan_actions.insert(self.reset_fans, -1)
         self.fans_card.append(fan_actions)
         for selector in (self.mode, self.source):
             selector.connect('notify::selected', lambda *_: self.switch())
         self.load_entry()
 
     def populate(self, caps):
-        info = caps.get('profile_epp', {})
-        if info.get('supported'):
-            self.epp_card.set_sensitive(True)
-            self.epp_linked.set_active(info.get('enabled', False))
-            for mode, choice in zip(MODES, self.epp_choices):
-                choice.set_selected(EPP.index(info['profiles'].get(mode, 'default')))
-            if info.get('ppd_active'):
-                self.epp_card.append(label('系统电源服务也可能修改实际 EPP。', True))
-        else:
-            self.epp_card.append(label(info.get('reason', 'asusd EPP 不可用'), True))
         fan_info = caps.get('fan_curves', {})
         if fan_info.get('supported'):
             self.reset_fans.set_sensitive(True)
@@ -101,19 +69,23 @@ class CombinationEditor:
         self.refresh(self.controller.state)
 
     def add_power_row(self, key, data):
-        row = box(True)
-        self.power_card.append(row)
+        group = box(spacing=6)
+        self.power_card.append(group)
         checked = Gtk.CheckButton(label=data['label'])
         checked.set_hexpand(True)
-        row.append(checked)
+        group.append(checked)
+        row = flow(maximum=2)
+        group.append(row)
         field = Gtk.SpinButton.new_with_range(data['minimum'], data['maximum'], data['step'])
         field.set_value(data['current'])
-        row.append(field)
-        row.append(label(attribute_unit(key)))
+        value = box(True)
+        value.append(field)
+        value.append(label(attribute_unit(key)))
+        row.insert(value, -1)
         default = button('填入默认值', lambda key=key: self.fill_default(key))
-        row.append(default)
+        row.insert(default, -1)
         reading = label('--', True)
-        self.power_card.append(reading)
+        group.append(reading)
         self.power_rows[key] = checked, field, reading, default, data
         self.load_power_row(key)
 
@@ -173,7 +145,7 @@ class CombinationEditor:
         if self.controller.persist(combinations=settings):
             self.controller.combinations = settings
             self.controller.combination_policy.invalidate()
-            self.note.set_label('六套组合已保存')
+            self.note.set_label('六套功耗与风扇配置已保存')
 
     def apply(self):
         if not self.controller.backend or self.busy:
@@ -188,14 +160,8 @@ class CombinationEditor:
         self.busy = True
         self.controller.perform(
             lambda: self.controller.backend.apply_combination(mode, source, entry),
-            notice=self.note, pending='正在应用组合…',
+            notice=self.note, pending='正在应用当前功耗与风扇草稿…',
             finished=lambda: setattr(self, 'busy', False))
-
-    def save_epp(self):
-        profiles = {mode: EPP[choice.get_selected()] for mode, choice in zip(MODES, self.epp_choices)}
-        linked = self.epp_linked.get_active()
-        self.controller.perform(lambda: self.controller.backend.save_profile_epp(linked, profiles),
-                                control=self.epp_save)
 
     def read_curves(self):
         if not self.controller.backend:
@@ -222,7 +188,7 @@ class CombinationEditor:
                 self.model.replace_fans(selected, curves)
                 if self.model.selected == selected:
                     self.fan.load(curves, True)
-                self.note.set_label('asusd 曲线已恢复。保存全部配置可更新当前组合。')
+                self.note.set_label('asusd 曲线已恢复。保存六套配置可保留当前草稿。')
 
             self.controller.perform(lambda: self.controller.backend.reset_fan_curves(mode),
                                     control=self.reset_fans, done=done, notice=self.note)
@@ -254,12 +220,8 @@ class CombinationEditor:
 
     def refresh(self, state):
         mode, ac = state.get('profile'), state.get('ac')
-        self.live.set_label(f"当前组合 {MODENAMES.get(mode, '--')} · "
+        self.live.set_label(f"电脑当前 {MODENAMES.get(mode, mode) or '--'} · "
                             + ('插电' if ac is True else '离电' if ac is False else '--'))
-        cpu = state.get('cpu_epp', {})
-        pref = '、'.join(cpu.get('energy_performance_preference', [])) or '--'
-        governor = '、'.join(cpu.get('scaling_governor', [])) or '--'
-        self.epp_live.set_label(f'实际 EPP {pref} · 调速器 {governor}')
         power = state.get('power_limits') or self.controller.caps.get('power_limits', {})
         gpu_block = power.get('gpu_block')
         for key, data in power.get('attributes', {}).items():

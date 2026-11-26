@@ -1,7 +1,7 @@
 """GTK fan curve table, chart and drag gestures."""
 from .drafts import CurveDraft, pwm_percent
 from .gtk import Gtk
-from .widgets import FAN_NAMES, box, button, dropdown, label
+from .widgets import FAN_NAMES, button, dropdown, flow, label
 
 
 class CurveEditor:
@@ -11,13 +11,13 @@ class CurveEditor:
         self.selected = 0
         self.loading = False
         self.drag = None
-        row = box(True)
+        row = flow()
         parent.append(row)
         self.managed = Gtk.CheckButton(label='管理风扇曲线')
         self.switcher = dropdown([])
         self.enabled = Gtk.CheckButton(label='启用此曲线')
         for widget in (self.managed, self.switcher, self.enabled):
-            row.append(widget)
+            row.insert(widget, -1)
         self.note = label('--', True)
         parent.append(self.note)
         self.plot = Gtk.DrawingArea(content_height=205)
@@ -28,16 +28,12 @@ class CurveEditor:
         gesture.connect('drag-update', self.drag_update)
         gesture.connect('drag-end', lambda *_: setattr(self, 'drag', None))
         self.plot.add_controller(gesture)
-        table = box(True, 20)
-        table.set_homogeneous(True)
-        table.set_margin_start(36)
-        table.set_margin_end(36)
+        table = flow(maximum=2, homogeneous=True)
         parent.append(table)
         self.inputs = []
         for block in range(2):
-            grid = Gtk.Grid(column_spacing=16, row_spacing=6,
-                            halign=Gtk.Align.START if block == 0 else Gtk.Align.END)
-            table.append(grid)
+            grid = Gtk.Grid(column_spacing=16, row_spacing=6, halign=Gtk.Align.CENTER)
+            table.insert(grid, -1)
             for column, text in enumerate(('点', '温度 °C', '风扇输出 %')):
                 grid.attach(label(text, True), column, 0, 1, 1)
             for row_index in range(4):
