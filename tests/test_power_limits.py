@@ -1,4 +1,6 @@
 import json
+import re
+from asus_power.i18n import tr
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
@@ -78,7 +80,7 @@ class PowerTests(unittest.TestCase):
 
     def test_requires_explicit_tuning_enabled(self):
         self.enabled = False
-        with self.assertRaisesRegex(ValueError, '启用'):
+        with self.assertRaisesRegex(ValueError, re.escape(tr('power.enable_first'))):
             self.api.apply('ppt_pl1_spl', 40)
         self.assertFalse(any('set-property' in call for call in self.calls))
 
@@ -90,7 +92,7 @@ class PowerTests(unittest.TestCase):
 
     def test_cached_only_success_is_rejected(self):
         self.cache_only = True
-        with self.assertRaisesRegex(RuntimeError, '驱动实际'):
+        with self.assertRaisesRegex(RuntimeError, re.escape(tr('power.driver_mismatch'))):
             self.api.apply('ppt_pl1_spl', 40)
         self.assertEqual(self.api.read_attributes()['ppt_pl1_spl']['current'], 60)
         self.assertEqual(self.calls[-1][-1], '60')
@@ -102,7 +104,7 @@ class PowerTests(unittest.TestCase):
             self.api.write('nv_tgp', 40)
         self.manager_automation = False
         self.assertIn('nv_tgp', self.api.status()['attributes'])
-        self.assertIn('已应用', self.api.apply('nv_tgp', 40))
+        self.assertEqual(tr('power.applied', label=tr('power.gpu_tgp'), value=40, unit='W'), self.api.apply('nv_tgp', 40))
         self.manager_automation = None
         self.assertNotIn('nv_tgp', self.api.status()['attributes'])
         self.manager_automation = False
@@ -111,18 +113,18 @@ class PowerTests(unittest.TestCase):
         (dock / 'class').write_text('0x030000')
         (dock / 'removable').write_text('removable')
         self.assertNotIn('nv_tgp', self.api.read_attributes())
-        self.assertEqual(self.api.apply('ppt_pl1_spl', 40), '处理器持续功率（SPL / PL1） 已应用 40 W')
+        self.assertEqual(self.api.apply('ppt_pl1_spl', 40), tr('power.applied', label=tr('power.cpu_sustained'), value=40, unit='W'))
 
     def test_firmware_deferral_after_gpu_preflight_is_reported_as_queued(self):
         self.defer = True
-        self.assertIn('已排队', self.api.apply('nv_tgp', 40))
+        self.assertEqual(tr('power.queued', label=tr('power.gpu_tgp'), value=40, unit='W'), self.api.apply('nv_tgp', 40))
         self.assertEqual(self.api.status()['attributes']['nv_tgp']['pending'], 40)
         self.assertEqual(self.api.read_attributes()['nv_tgp']['current'], 60)
-        self.assertIn('已排队', self.api.apply('nv_tgp', 60))
+        self.assertEqual(tr('power.queued', label=tr('power.gpu_tgp'), value=60, unit='W'), self.api.apply('nv_tgp', 60))
 
     def test_context_switch_does_not_restore_into_new_profile(self):
         self.switch_context = True
-        with self.assertRaisesRegex(RuntimeError, '切换'):
+        with self.assertRaisesRegex(RuntimeError, re.escape(tr('power.context_changed'))):
             self.api.apply('ppt_pl1_spl', 40)
         writes = [call for call in self.calls if 'set-property' in call]
         self.assertEqual(len(writes), 1)
@@ -159,7 +161,9 @@ class PowerTests(unittest.TestCase):
 
         backend = LinuxBackend(self.root, transition, '/simulated/asusctl')
         self.api.bus.runner = transition
-        with self.assertRaisesRegex(RuntimeError, '切换|供电或方案已改变'):
+        expected = (tr('combination.aborted_context', error=tr('power.context_changed'))
+                    if combined else tr('power.context_changed'))
+        with self.assertRaisesRegex(RuntimeError, re.escape(expected)):
             if combined:
                 backend.apply_combination(
                     'balanced', 'ac', {'power': {'ppt_pl1_spl': 40}, 'fans': {}})
@@ -189,7 +193,7 @@ class PowerTests(unittest.TestCase):
             return result
 
         self.api.bus.runner = change_peripheral
-        self.assertIn('已应用', self.api.apply('ppt_pl1_spl', 40))
+        self.assertEqual(tr('power.applied', label=tr('power.cpu_sustained'), value=40, unit='W'), self.api.apply('ppt_pl1_spl', 40))
         self.assertEqual(self.api.read_attributes()['ppt_pl1_spl']['current'], 40)
 
     def test_context_uses_threshold_capable_system_battery_and_mains_priority(self):

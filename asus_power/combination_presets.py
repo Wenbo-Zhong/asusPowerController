@@ -1,4 +1,4 @@
-"""Factory presets for the software’s six power and cooling combinations."""
+"""六套组合的初始软件预设；combinations 在首次无配置时按机型载入。"""
 from pathlib import Path
 import re
 
@@ -13,7 +13,7 @@ POWER_FIELDS = (
 )
 FANS = ('cpu', 'gpu', 'mid')
 
-# Each fan has eight temperature points in °C and eight raw PWM values (0–255).
+# 每个风扇包含 8 个摄氏温度点和 8 个原始 PWM 字节（0–255）。
 PROART_P16_HX370 = {
     ('quiet', 'ac'): (
         (25, 38, 45, 55, 5, 77),

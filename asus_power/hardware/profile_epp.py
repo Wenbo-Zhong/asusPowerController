@@ -1,4 +1,5 @@
-"""ROG Control Center style platform-profile EPP settings through asusd D-Bus."""
+"""独立保存 asusd 的三套 EPP 规则；插电/离电共用，退出界面后继续生效。"""
+from ..i18n import tr
 import subprocess
 from .bus import BusClient, OBJECT, PLATFORM as INTERFACE, SERVICE
 
@@ -10,7 +11,7 @@ LINK = 'PlatformProfileLinkedEpp'
 
 class ProfileEpp:
     def __init__(self, runner=subprocess.run):
-        self.bus = BusClient(runner, timeout=8, error='asusd EPP 接口调用失败')
+        self.bus = BusClient(runner, timeout=8, error=tr('epp.call_failed'))
 
     def read(self):
         result = self.bus.json('call', SERVICE, OBJECT, 'org.freedesktop.DBus.Properties',
@@ -18,13 +19,13 @@ class ProfileEpp:
         properties = result['data'][0]
         linked = properties[LINK]
         if linked['type'] != 'b' or not isinstance(linked['data'], bool):
-            raise ValueError('asusd EPP 联动属性格式无效')
+            raise ValueError(tr('epp.invalid_link'))
         profiles = {}
         for profile, name in PROPERTIES.items():
             value = properties[name]
             index = value['data']
             if value['type'] != 'u' or type(index) is not int or not 0 <= index < len(EPP):
-                raise ValueError('asusd EPP 枚举版本不兼容')
+                raise ValueError(tr('epp.enum_incompatible'))
             profiles[profile] = EPP[index]
         return {'supported': True, 'enabled': linked['data'], 'profiles': profiles,
                 'choices': list(EPP)}
@@ -49,9 +50,9 @@ class ProfileEpp:
 
     def save(self, enabled, profiles):
         if type(enabled) is not bool or not isinstance(profiles, dict) or set(profiles) != set(PROPERTIES):
-            raise ValueError('需要指定联动开关和三种方案的 EPP')
+            raise ValueError(tr('epp.required_rules'))
         if any(value not in EPP for value in profiles.values()):
-            raise ValueError('请选择 asusd 支持的 EPP 档位')
+            raise ValueError(tr('epp.unsupported_level'))
         old = self.read()
         before = {PROPERTIES[key]: value for key, value in old['profiles'].items()}
         before[LINK] = old['enabled']
@@ -66,7 +67,7 @@ class ProfileEpp:
                 self.set_property(name, value)
             actual = self.read()
             if actual['enabled'] != enabled or actual['profiles'] != profiles:
-                raise RuntimeError('asusd EPP 规则回读不一致')
+                raise RuntimeError(tr('epp.readback_mismatch'))
         except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError, IndexError) as error:
             failures = []
             for name in reversed(changed):
@@ -78,6 +79,6 @@ class ProfileEpp:
                         self.set_property(name, before[name])
                 except Exception as recovery:
                     failures.append(str(recovery))
-            detail = '；部分恢复失败：' + ' / '.join(failures) if failures else '；已尝试恢复原规则'
-            raise RuntimeError(f'EPP 规则保存失败：{error}{detail}') from error
-        return 'EPP 方案规则已保存到 asusd，方案切换时由后台服务应用'
+            detail = tr('recovery.partial_prefix') + ' / '.join(failures) if failures else tr('epp.restored_suffix')
+            raise RuntimeError(tr('epp.save_failed', error=error, detail=detail)) from error
+        return tr('epp.saved')

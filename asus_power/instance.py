@@ -1,4 +1,5 @@
-"""One controller per desktop user, including authorized launches."""
+"""按桌面用户维持单实例；提权升级时等待旧进程完成硬件任务后再接管。"""
+from .i18n import tr
 import errno
 import os
 import socket
@@ -39,20 +40,19 @@ class Instance:
                     client.settimeout(1)
                     client.connect(self.address)
                     if peer_uid(client) not in (self.uid, 0):
-                        raise PermissionError('现有实例的用户身份不匹配')
+                        raise PermissionError(tr('instance.uid_mismatch'))
                     client.sendall(self.command)
                     reply = client.recv(16)
                     if reply == b'handled':
                         return False
                     if reply == b'retry' and self.command == b'upgrade':
-                        # The old instance retains its lock while hardware work
-                        # drains. Only a verified upgrade acknowledgement removes
-                        # the normal response deadline.
+                        # 旧实例完成硬件任务之前持有锁；只有验证过的提权升级确认
+                        # 才取消普通响应超时，避免等待期间启动两个硬件控制器。
                         replacing = True
             except (ConnectionError, TimeoutError):
                 pass
             time.sleep(.05)
-        raise RuntimeError('等待现有电脑管家实例响应超时')
+        raise RuntimeError(tr('instance.timeout'))
 
     def attach(self, root, show, quit_app):
         def accept(listener, _mask):
@@ -60,7 +60,7 @@ class Instance:
                 peer, _ = listener.accept()
             except BlockingIOError:
                 return
-            # An idle connection must never block the GUI or other launches.
+            # 空闲连接不能阻塞界面主线程或其他启动请求。
             peer.setblocking(False)
 
             def release():

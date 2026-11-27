@@ -86,12 +86,19 @@ class PackagingTests(unittest.TestCase):
                       if path.is_file()}
             self.assertEqual(actual, expected)
             self.assertIn('asus_power/ui/assets/palette.json', actual)
+            for language in ('en', 'zh_Hans', 'zh_Hant'):
+                self.assertIn(f'asus_power/locales/{language}.json', actual)
+            desktop = (stage / 'usr/share/applications/asus-power-controller.desktop').read_text()
+            self.assertIn('Name[zh_TW]=電腦管家\n', desktop)
+            self.assertIn('Comment[zh_CN]=管理华硕笔记本的功耗与散热\n', desktop)
             self.assertEqual((app / 'asus_power/ui/controller.py').stat().st_mode & 0o777, 0o644)
             self.assertEqual((stage / 'usr/bin/asus-power-controller').stat().st_mode & 0o777, 0o755)
             probe = ('import sys; sys.path.insert(0,sys.argv[1]); '
                      'from asus_power.ui.drafts import CombinationDraft; '
                      'from asus_power.hardware.bus import BusClient; '
-                     'from asus_power.backend import LinuxBackend')
+                     'from asus_power.backend import LinuxBackend; '
+                     'from asus_power.i18n import Translator; '
+                     'assert Translator("zh_TW")("app.name") == "電腦管家"')
             imported = subprocess.run([sys.executable, '-I', '-c', probe, str(app)], cwd=root,
                                       capture_output=True, text=True, timeout=10)
             self.assertEqual(imported.returncode, 0, imported.stdout + imported.stderr)

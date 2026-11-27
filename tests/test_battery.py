@@ -1,4 +1,5 @@
 import math
+from asus_power.i18n import tr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -42,7 +43,7 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(data['time_seconds'], 10800)
         self.assertEqual(data['cycle_count'], 0)
         self.assertTrue(data['energy_converted'])
-        self.assertIn('0 次', formatted_values(data)['cycles'])
+        self.assertEqual('0' + tr('battery.cycles_suffix'), formatted_values(data)['cycles'])
 
     def test_charge_time_uses_limit_not_100_percent(self):
         self.put(status='Charging', energy_now=45000000, energy_full=80000000,
@@ -51,9 +52,9 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(data['time_seconds'], (64 - 45) / 10 * 3600)
         self.assertEqual(data['time_target_percent'], 80)
         shown = formatted_values(data)
-        self.assertEqual(shown['time_title'], '预计充至 80%')
-        self.assertEqual(shown['power_title'], '充电功率')
-        self.assertEqual(shown['time'], '约 1 小时 54 分钟')
+        self.assertEqual(shown['time_title'], tr('battery.eta_target', target=80))
+        self.assertEqual(shown['power_title'], tr('battery.charging_power'))
+        self.assertEqual(shown['time'], tr('battery.hours_minutes', hours=1, minutes=54))
         self.put(energy_now=65000000)
         self.assertIsNone(read_battery(self.path)['time_seconds'])
 
@@ -87,7 +88,7 @@ class BatteryTests(unittest.TestCase):
         self.assertEqual(formatted_values(data)['health'], '—')
         self.put(present=0)
         self.assertFalse(read_battery(self.path)['present'])
-        self.assertEqual(formatted_values(read_battery(self.path))['summary'], '未检测到电池')
+        self.assertEqual(formatted_values(read_battery(self.path))['summary'], tr('battery.not_detected'))
 
     def test_full_paused_and_unknown_status_have_no_eta(self):
         self.put(energy_now=45000000, energy_full=80000000, power_now=10000000)
@@ -114,7 +115,7 @@ class BatteryTests(unittest.TestCase):
         self.put(status='Charging', power_now=-10000000, energy_now=40000000, energy_full=80000000)
         data = read_battery(self.path)
         self.assertEqual(data['power_w'], 10)
-        self.assertEqual(formatted_values(data)['power_title'], '充电功率')
+        self.assertEqual(formatted_values(data)['power_title'], tr('battery.charging_power'))
         self.assertEqual(data['time_seconds'], 14400)
 
     def test_charge_based_eta_does_not_require_a_voltage_sensor(self):

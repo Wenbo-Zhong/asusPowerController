@@ -1,4 +1,12 @@
-"""Ayatana status notifier in a separate GTK 3 desktop-session process."""
+"""独立 GTK 3 托盘进程；SessionTray 维持原桌面用户身份并通知 GTK 4 主窗口。"""
+if __package__:
+    from .i18n import tr
+else:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from i18n import tr
+
 import ctypes as C
 
 _CALLBACK = C.CFUNCTYPE(None, C.c_void_p, C.c_void_p)
@@ -23,7 +31,7 @@ class Tray:
 
         ptr, string, integer = C.c_void_p, C.c_char_p, C.c_int
         if not bind(gtk, 'gtk_init_check', integer, ptr, ptr)(None, None):
-            raise RuntimeError('GTK 无法连接桌面')
+            raise RuntimeError(tr('tray.gtk_unavailable'))
         self.pending = bind(gtk, 'gtk_events_pending', integer)
         self.iterate = bind(gtk, 'gtk_main_iteration_do', integer, integer)
         new = bind(indicator, 'app_indicator_new', ptr, string, string, integer)
@@ -34,7 +42,7 @@ class Tray:
         connect = bind(gobject, 'g_signal_connect_data', C.c_ulong, ptr, string, ptr, ptr, ptr, integer)
         self.item = new(b'asus-power-controller', b'preferences-system-power', 0)
         if not self.item:
-            raise RuntimeError('无法创建托盘图标')
+            raise RuntimeError(tr('tray.create_failed'))
 
         def on_connection(_item, connected, _data):
             was_connected = self.connected
@@ -45,7 +53,7 @@ class Tray:
         callback = _CONNECTION(on_connection)
         self.callbacks.append(callback)
         connect(self.item, b'connection-changed', callback, None, None, 0)
-        for label, action in [('打开电脑管家', show), ('退出', quit_app)]:
+        for label, action in [(tr('tray.open'), show), (tr('tray.quit'), quit_app)]:
             widget = menu_item(label.encode())
             callback = _CALLBACK(lambda _widget, _data, fn=action: root.after_idle(fn))
             self.callbacks.append(callback)
@@ -69,7 +77,7 @@ class Tray:
 
 
 class SessionTray:
-    """Keep the indicator on the desktop user's bus when the window is elevated."""
+    """主窗口提权后，托盘仍连接原桌面用户的会话总线。"""
 
     def __init__(self, root, show, quit_app, uid):
         import os
@@ -84,8 +92,7 @@ class SessionTray:
         user = pwd.getpwuid(uid)
         env = dict(os.environ, HOME=user.pw_dir, USER=user.pw_name, LOGNAME=user.pw_name)
         env.pop('PKEXEC_UID', None)
-        # The helper uses only the desktop libraries and inherits the authorized
-        # process's display environment, but connects as the desktop user.
+        # 子进程继承显示和语言环境，但降回桌面用户，避免使用 root 的会话总线。
         credentials = {}
         if os.geteuid() == 0 and user.pw_uid != 0:
             credentials = dict(user=user.pw_uid, group=user.pw_gid,

@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from asus_power.i18n import tr
 from copy import deepcopy
 import importlib
 from queue import Queue
@@ -167,8 +168,8 @@ class GtkCompletionTests(unittest.TestCase):
         control.set_sensitive.assert_called_once_with(False)
         notice.set_label.assert_called_once_with('正在应用组合…')
         self.receive()
-        notice.set_label.assert_called_with('失败：D-Bus denied')
-        self.controller.status.set_label.assert_called_once_with('失败：D-Bus denied')
+        notice.set_label.assert_called_with(tr('app.failed', failure='D-Bus denied'))
+        self.controller.status.set_label.assert_called_once_with(tr('app.failed', failure='D-Bus denied'))
         self.assertEqual([call.args[0] for call in control.set_sensitive.call_args_list], [False, True])
         finished.assert_called_once_with()
 
@@ -180,7 +181,7 @@ class GtkCompletionTests(unittest.TestCase):
                                 done=done, finished=finished)
         self.receive()
         done.assert_called_once_with({'actual': 40})
-        self.controller.status.set_label.assert_called_once_with('失败：callback failed')
+        self.controller.status.set_label.assert_called_once_with(tr('app.failed', failure='callback failed'))
         control.set_sensitive.assert_called_with(True)
         finished.assert_called_once_with()
 

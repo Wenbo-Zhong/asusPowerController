@@ -1,4 +1,4 @@
-"""GNOME session idle detection and keyboard backlight timeout."""
+"""使用 GNOME 会话接口检测闲置并熄灭键盘灯；活动恢复时保留手动亮度变更。"""
 
 IDLE = 'org.gnome.Mutter.IdleMonitor'
 POWER = 'org.gnome.SettingsDaemon.Power'

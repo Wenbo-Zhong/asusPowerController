@@ -1,4 +1,5 @@
-"""Read-only discovery and validated, unprivileged asusctl operations."""
+"""界面的硬件入口：汇总 hardware 探测，校验 asusctl 写入，并调度核显提权助手。"""
+from .i18n import CATALOG_DIR, tr
 from pathlib import Path
 import os
 import shutil
@@ -49,7 +50,7 @@ class LinuxBackend:
                             self.fans.append(name)
         self.led = any((self.root / 'class/leds').glob('*kbd_backlight'))
         self.version = self.command('--help') if self.exe else ''
-        # Only enable write controls for the modern subcommand syntax we inspected.
+        # 仅为已确认的现代 asusctl 子命令开放写操作，避免跨版本误用接口。
         self.modern = 'battery' in self.version and 'profile' in self.version
 
     def discover_power_supplies(self):
@@ -60,17 +61,17 @@ class LinuxBackend:
 
     def command(self, *args):
         if not self.exe:
-            raise HardwareError('未安装 asusctl；请先安装发行版提供的 asusctl / asusd')
+            raise HardwareError(tr('backend.asusctl_missing'))
         try:
             result = self.runner([self.exe, *args], capture_output=True, text=True, timeout=12)
         except (OSError, subprocess.TimeoutExpired) as error:
             raise HardwareError(str(error)) from error
         if result.returncode:
-            raise HardwareError((result.stderr or result.stdout or 'asusctl 执行失败').strip())
+            raise HardwareError((result.stderr or result.stdout or tr('backend.asusctl_failed')).strip())
         return result.stdout.strip()
 
     def capabilities(self):
-        return {'model': read(self.root / 'class/dmi/id/product_name', '未知设备'),
+        return {'model': read(self.root / 'class/dmi/id/product_name', tr('common.unknown_device')),
                 'profiles': self.profiles, 'asusctl': self.exe, 'modern_cli': self.modern,
                 'charge_limit': bool(self.battery and (self.battery / 'charge_control_end_threshold').exists()),
                 'battery_info': read_battery(self.battery),
@@ -82,11 +83,11 @@ class LinuxBackend:
 
     def one_shot_charge(self):
         if self.battery is None or not (self.battery / 'charge_control_end_threshold').is_file():
-            raise HardwareError('当前设备不支持一次充满')
+            raise HardwareError(tr('battery.full_charge_unsupported'))
         features = RogFeatures(self.runner)
         message = features.full_charge()
         if number(self.battery / 'charge_control_end_threshold') != 100:
-            raise HardwareError('一次充满请求已发出，但充电上限未回读为 100%')
+            raise HardwareError(tr('battery.full_charge_readback'))
         return message
 
     def save_aura(self, path, color, enabled):
@@ -118,13 +119,13 @@ class LinuxBackend:
 
     def cpu_epp_status(self):
         policies = list((self.root / 'devices/system/cpu/cpufreq').glob('policy[0-9]*'))
-        return {key: sorted({read(policy / key, '未知') for policy in policies})
+        return {key: sorted({read(policy / key, tr('common.unknown')) for policy in policies})
                 for key in ('scaling_governor', 'energy_performance_preference')}
 
     def igpu_clock(self):
         devices = find_devices(self.root)
         if not devices:
-            return {'supported': False, 'reason': '未检测到支持频率控制的 AMD 核显'}
+            return {'supported': False, 'reason': tr('igpu.not_detected')}
         address, device = next(iter(devices.items()))
         try:
             return {**clock_info(device), 'device': address, 'supported': True,
@@ -137,24 +138,26 @@ class LinuxBackend:
         if os.geteuid() != 0:
             pkexec = shutil.which('pkexec')
             if not pkexec:
-                raise HardwareError('未安装 pkexec，无法请求管理员授权')
+                raise HardwareError(tr('backend.pkexec_missing'))
             command = [pkexec, *arguments]
         try:
             result = self.runner(command, capture_output=True, text=True, timeout=150)
         except (OSError, subprocess.TimeoutExpired) as error:
-            raise HardwareError(f'核显控制授权或执行失败，请检查当前状态：{error}') from error
+            raise HardwareError(tr('igpu.execution_failed', error=error)) from error
         if result.returncode:
-            raise HardwareError((result.stderr or '核显操作未完成或授权已取消').strip())
+            raise HardwareError((result.stderr or tr('igpu.cancelled')).strip())
 
     def install_igpu_helper(self):
         if not self.igpu_clock()['supported']:
-            raise HardwareError('当前设备不支持核显频率控制')
-        source = Path(__file__).with_name('igpu.py').resolve()
+            raise HardwareError(tr('igpu.unsupported'))
+        source = Path(__file__).resolve().parent
+        # 一次授权安装助手和语言资源；之后只运行经所有权检查的固定路径。
+        files = [source / 'igpu.py', source / 'i18n.py', *sorted(CATALOG_DIR.glob('*.json'))]
         self.privileged_igpu_command(['/usr/bin/install', '-D', '-m', '0644', '-o', 'root', '-g', 'root',
-                                     '--', str(source), str(HELPER)])
+                                     '-t', str(HELPER.parent), '--', *(str(file) for file in files)])
         if not trusted_helper():
-            raise HardwareError('核显控制组件的所有者或目录权限未通过检查')
-        return '核显控制组件已安装'
+            raise HardwareError(tr('igpu.helper_untrusted'))
+        return tr('igpu.helper_installed')
 
     def set_igpu_max(self, maximum=None):
         info = self.igpu_clock()
@@ -162,19 +165,19 @@ class LinuxBackend:
             raise HardwareError(info['reason'])
         if maximum is not None and (isinstance(maximum, bool) or not isinstance(maximum, int)
                                     or not info['minimum'] <= maximum <= info['upper']):
-            raise ValueError(f"最高频率需为 {info['minimum']}–{info['upper']} MHz 内的整数")
+            raise ValueError(tr('igpu.integer_range', minimum=info['minimum'], upper=info['upper']))
         if not trusted_helper():
-            raise HardwareError('请先安装核显控制组件')
+            raise HardwareError(tr('igpu.install_first'))
         action = ['--reset'] if maximum is None else ['--max', str(maximum)]
         self.privileged_igpu_command(['/usr/bin/python3', '-I', str(HELPER),
-                                     '--device', info['device'], *action])
+                                     '--language', tr.language, '--device', info['device'], *action])
         actual = self.igpu_clock()
         expected = info['upper'] if maximum is None else maximum
         mode = 'auto' if maximum is None else 'manual'
         if (not actual['supported'] or actual['device'] != info['device']
                 or actual['maximum'] != expected or actual['mode'] != mode):
-            raise HardwareError('核显设置后的回读不一致，请检查当前状态')
-        return '已恢复核显自动调频' if maximum is None else f'核显最高频率已设为 {maximum} MHz'
+            raise HardwareError(tr('igpu.readback_check'))
+        return tr('igpu.auto_restored') if maximum is None else tr('igpu.max_applied', maximum=maximum)
 
     def snapshot(self):
         self.discover_power_supplies()
@@ -209,29 +212,29 @@ class LinuxBackend:
                 'power_limits': power_limits}
 
     def switch_profile_on_power_change(self, target, profile, ac):
-        # The worker may run after a newer desktop profile change or unplug.
+        # 排队任务可能晚于桌面手动切换或拔电开始，执行前须确认采样状态仍有效。
         if self.combination_context() == {'profile': profile, 'ac': ac}:
             self.set_profile(target)
 
     def set_profile(self, profile):
         if not self.modern or profile not in self.profiles:
-            raise ValueError('该设备或 asusctl 版本不支持此性能模式')
+            raise ValueError(tr('backend.profile_unsupported'))
         self.command('profile', 'set', profile)
         actual = read(self.profile_path)
         if actual != profile:
-            raise HardwareError(f'性能模式回读失败：请求 {profile}，实际 {actual}')
+            raise HardwareError(tr('backend.profile_readback', profile=profile, actual=actual))
 
     def set_limit(self, value):
         if isinstance(value, bool) or not isinstance(value, int) or not 20 <= value <= 100:
-            raise ValueError('充电上限必须是 20–100 的整数')
+            raise ValueError(tr('battery.limit_range'))
         if not self.modern or self.battery is None or not (self.battery / 'charge_control_end_threshold').exists():
-            raise ValueError('不支持充电上限')
+            raise ValueError(tr('battery.limit_unsupported'))
         self.command('battery', 'limit', str(value))
         actual = number(self.battery / 'charge_control_end_threshold')
         if actual != value:
-            raise HardwareError(f'充电上限回读失败：请求 {value}，实际 {actual}')
+            raise HardwareError(tr('battery.limit_readback', value=value, actual=actual))
 
     def set_keyboard(self, level):
         if not self.modern or not self.led or level not in ('off', 'low', 'med', 'high'):
-            raise ValueError('不支持此键盘亮度')
+            raise ValueError(tr('keyboard.brightness_unsupported'))
         self.command('leds', 'set', level)

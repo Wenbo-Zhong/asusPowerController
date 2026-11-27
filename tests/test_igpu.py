@@ -1,4 +1,6 @@
 import subprocess
+import re
+from asus_power.i18n import tr
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -88,7 +90,7 @@ class IgpuTests(unittest.TestCase):
     def test_commit_failure_restores_original_cap_and_mode(self):
         self.fail_commit = True
         with patch.object(Path, 'write_text', self.emulate):
-            with self.assertRaisesRegex(RuntimeError, '已恢复'):
+            with self.assertRaisesRegex(RuntimeError, re.escape(tr('igpu.failed_restored', error='commit failed'))):
                 igpu.change_clock(self.device, 1400)
         after = igpu.clock_info(self.device)
         self.assertEqual((after['maximum'], after['mode']), (2900, 'auto'))
@@ -96,7 +98,7 @@ class IgpuTests(unittest.TestCase):
     def test_readback_failure_restores_original_cap_and_mode(self):
         self.ignore_commit = True
         with patch.object(Path, 'write_text', self.emulate):
-            with self.assertRaisesRegex(RuntimeError, '回读'):
+            with self.assertRaisesRegex(RuntimeError, re.escape(tr('igpu.readback_mismatch'))):
                 igpu.change_clock(self.device, 1400)
         self.assertEqual(igpu.clock_info(self.device)['mode'], 'auto')
         self.assertEqual(igpu.clock_info(self.device)['maximum'], 2900)
@@ -107,7 +109,7 @@ class IgpuTests(unittest.TestCase):
         self.staged[:] = [800, 1400]
         self.fail_commit = True
         with patch.object(Path, 'write_text', self.emulate):
-            with self.assertRaisesRegex(RuntimeError, '已恢复'):
+            with self.assertRaisesRegex(RuntimeError, re.escape(tr('igpu.failed_restored', error='commit failed'))):
                 igpu.change_clock(self.device)
         after = igpu.clock_info(self.device)
         self.assertEqual((after['minimum'], after['maximum'], after['mode']), (800, 1400, 'manual'))
@@ -125,11 +127,11 @@ class IgpuTests(unittest.TestCase):
 
         backend = LinuxBackend(self.root, runner, '/usr/bin/asusctl')
         with patch('asus_power.backend.trusted_helper', return_value=False):
-            with self.assertRaisesRegex(HardwareError, '安装'):
+            with self.assertRaisesRegex(HardwareError, re.escape(tr('igpu.install_first'))):
                 backend.set_igpu_max(1400)
         with patch('asus_power.backend.trusted_helper', return_value=True), \
                 patch('asus_power.backend.shutil.which', return_value='/usr/bin/pkexec'):
             backend.set_igpu_max(1400)
         self.assertEqual(calls[-1], ['/usr/bin/pkexec', '/usr/bin/python3', '-I', str(igpu.HELPER),
-                                    '--device', '0000:66:00.0', '--max', '1400'])
+                                    '--language', tr.language, '--device', '0000:66:00.0', '--max', '1400'])
         self.assertEqual(backend.snapshot()['igpu_clock']['maximum'], 1400)

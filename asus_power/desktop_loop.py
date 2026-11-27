@@ -1,4 +1,4 @@
-"""GLib event source helpers for tray and single-instance sockets."""
+"""为托盘与单实例通信适配 GLib 事件源；一次性回调通过 once 移除事件源。"""
 from gi.repository import GLib
 
 

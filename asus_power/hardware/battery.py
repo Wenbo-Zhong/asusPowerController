@@ -1,9 +1,10 @@
-"""Read-only Linux battery telemetry, including charge-based ASUS batteries.
+"""只读电池遥测与显示数据；兼容 Wh 能量和 Ah 电荷量两种驱动接口。
 
 Behavior reference: asusctl 61c39ffd, rog-platform/src/power.rs and
 rog-control-center/ui/pages/battery.slint. Independently implemented; no
 upstream source is copied or bundled.
 """
+from ..i18n import tr
 import math
 from pathlib import Path
 
@@ -48,7 +49,7 @@ def read_battery(path):
         if not math.isfinite(power):
             power = None
 
-    # Both operands must have the same units; do not pair Wh with Ah.
+    # 健康度的分子分母必须同单位；不能把 Wh 满充容量与 Ah 设计容量相除。
     health = None
     for quantities in (energy, charge):
         full, design = quantities['full'], quantities['full_design']
@@ -73,7 +74,7 @@ def read_battery(path):
     seconds = None
     kind = None
     if status in ('Charging', 'Discharging'):
-        # Prefer native Wh/W; otherwise Ah/A avoids voltage-conversion errors.
+        # 优先使用原生 Wh/W；退回 Ah/A 时无需电压，避免单位折算误差。
         for quantities, rate in ((energy, power), (charge, current)):
             now, full = quantities['now'], quantities['full']
             if now is None or rate is None or rate <= 0:
@@ -95,8 +96,7 @@ def read_battery(path):
                     kind = 'charging' if status == 'Charging' else 'discharging'
             break
 
-    # For capacities expressed in Ah, use one nominal voltage for a comparable
-    # full/design Wh pair, and mark these energy values as estimates in the UI.
+    # Ah 容量统一用一个标称电压换算为可比较的 Wh，并在界面标明估算性质。
     nominal = design_voltage if design_voltage is not None and design_voltage > 0 else voltage
     converted = False
     display_energy = dict(energy)
@@ -118,32 +118,32 @@ def read_battery(path):
             'time_target_percent': (limit if limit is not None else 100) if kind == 'charging' else None}
 
 
-STATUS_NAMES = {'Charging': '正在充电', 'Discharging': '正在放电', 'Full': '已充满',
-                'Not charging': '已暂停充电', 'Unknown': '状态未知'}
+STATUS_NAMES = {'Charging': tr('battery.charging'), 'Discharging': tr('battery.discharging'), 'Full': tr('battery.full'),
+                'Not charging': tr('battery.not_charging'), 'Unknown': tr('battery.unknown_state')}
 
 
 def formatted_values(info):
-    """Keep units and missing-value handling consistent across all states."""
+    """所有状态共用单位和缺失值显示规则，避免页面各自折算。"""
     def amount(key, unit, digits=1):
         value = info.get(key)
         return '—' if value is None else f'{value:.{digits}f}{unit}'
 
     if not info.get('present'):
-        return {'summary': '未检测到电池', 'percent': '—', 'health': '—', 'power': '—',
-                'time': '—', 'power_title': '电池功率', 'time_title': '预计剩余时间',
-                'note': '电池连接后会在下一次状态刷新时读取可用信息。'}
+        return {'summary': tr('battery.not_detected'), 'percent': '—', 'health': '—', 'power': '—',
+                'time': '—', 'power_title': tr('battery.power'), 'time_title': tr('battery.remaining_time'),
+                'note': tr('battery.reconnect_note')}
     status = info.get('status', 'Unknown')
     charging = status == 'Charging'
-    power_title = '充电功率' if charging else '放电功率' if status == 'Discharging' else '电池功率'
+    power_title = tr('battery.charging_power') if charging else tr('battery.discharging_power') if status == 'Discharging' else tr('battery.power')
     target = info.get('time_target_percent')
-    time_title = f'预计充至 {target:g}%' if charging and target is not None else '预计充电时间' if charging else '预计可用时间'
+    time_title = tr('battery.eta_target', target=target) if charging and target is not None else tr('battery.charging_time') if charging else tr('battery.runtime')
     seconds = info.get('time_seconds')
     duration = '—'
     if seconds is not None and seconds > 0:
         minutes = max(1, round(seconds / 60))
         hours, minutes = divmod(minutes, 60)
-        duration = f'约 {hours} 小时 {minutes} 分钟' if hours else f'约 {minutes} 分钟'
-    values = {'summary': f"{info.get('name', '电池')} · {STATUS_NAMES.get(status, '状态未知')}",
+        duration = tr('battery.hours_minutes', hours=hours, minutes=minutes) if hours else tr('battery.minutes', minutes=minutes)
+    values = {'summary': f"{info.get('name', tr('page.battery'))} · {STATUS_NAMES.get(status, tr('battery.unknown_state'))}",
               'percent': amount('capacity_percent', '%', 0),
               'health': amount('health_percent', '%'), 'power': amount('power_w', ' W'),
               'time': duration, 'power_title': power_title, 'time_title': time_title,
@@ -152,11 +152,11 @@ def formatted_values(info):
               'energy': amount('energy_now_wh', ' Wh'),
               'charge_full': amount('charge_full_ah', ' Ah', 3),
               'charge_design': amount('charge_design_ah', ' Ah', 3),
-              'cycles': amount('cycle_count', ' 次', 0), 'voltage': amount('voltage_v', ' V', 2),
+              'cycles': amount('cycle_count', tr('battery.cycles_suffix'), 0), 'voltage': amount('voltage_v', ' V', 2),
               'current': amount('current_a', ' A', 3),
               'manufacturer': info.get('manufacturer') or '—', 'model': info.get('model') or '—',
               'technology': info.get('technology') or '—',
-              'note': '健康度 = 满充容量 ÷ 设计容量。预计时间按当前充放电速率估算，会随负载变化。'}
+              'note': tr('battery.health_note')}
     if info.get('energy_converted'):
-        values['note'] += ' 能量值由电荷量和电池电压折算。'
+        values['note'] += tr('battery.energy_note')
     return values

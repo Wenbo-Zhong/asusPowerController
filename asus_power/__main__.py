@@ -1,3 +1,5 @@
+"""命令行入口：诊断不加载 GTK；桌面启动必要时转交系统 Python。"""
+from .i18n import tr
 import argparse
 import json
 from .backend import LinuxBackend
@@ -12,9 +14,9 @@ def gtk_fallback_command(system_python, arguments):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='ASUS Power Controller')
-    parser.add_argument('--diagnose', action='store_true', help='只读输出设备能力和实时状态')
-    parser.add_argument('--start-hidden', action='store_true', help='启动到系统托盘')
+    parser = argparse.ArgumentParser(description=tr('app.name'))
+    parser.add_argument('--diagnose', action='store_true', help=tr('cli.diagnose_help'))
+    parser.add_argument('--start-hidden', action='store_true', help=tr('cli.hidden_help'))
     args = parser.parse_args()
     if args.diagnose:
         backend = LinuxBackend()
@@ -22,16 +24,16 @@ def main():
     else:
         import os
         import sys
-        # Draw the control panel without opening discrete or external GPU nodes.
+        # 使用 Cairo 绘制，避免界面初始化打开独显或外接显卡节点。
         os.environ['GSK_RENDERER'] = 'cairo'
         try:
             from .ui.controller import launch
         except (ImportError, ValueError) as error:
-            # Conda Python often lacks distribution GI bindings.
+            # Conda 等 Python 环境可能缺少发行版 GI，改用系统解释器并保留包路径。
             system_python = '/usr/bin/python3'
             if os.path.realpath(sys.executable) != os.path.realpath(system_python) and os.path.isfile(system_python):
                 os.execv(system_python, gtk_fallback_command(system_python, sys.argv[1:]))
-            parser.exit(1, f'需要 GTK 4、libadwaita 和 PyGObject：{error}\n')
+            parser.exit(1, tr('cli.gtk_required', error=error))
         launch(start_hidden=args.start_hidden)
 
 

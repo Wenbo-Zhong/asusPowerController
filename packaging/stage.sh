@@ -9,6 +9,7 @@ find asus_power \( -type d \( -name __pycache__ -o -name '.*' \) -prune \) -o \
        -exec install -Dm644 '{}' "$app/{}" \; \)
 install -m644 scripts/desktop_launcher.py "$app/scripts/"
 install -Dm644 packaging/asus-power-controller.desktop "$root/usr/share/applications/asus-power-controller.desktop"
+python3 scripts/localize_desktop.py packaging/asus-power-controller.desktop "$root/usr/share/applications/asus-power-controller.desktop"
 cat > "$root/usr/bin/asus-power-controller" <<'WRAPPER'
 #!/bin/sh
 exec /usr/bin/python3 -I /usr/lib/asus-power-controller/scripts/desktop_launcher.py "$@"

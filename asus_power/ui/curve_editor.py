@@ -1,4 +1,5 @@
-"""GTK fan curve table, chart and drag gestures."""
+"""风扇曲线表格与拖拽图；数据校验和无损 PWM 转换委托 drafts。"""
+from ..i18n import tr
 from .drafts import CurveDraft, pwm_percent
 from .gtk import Gtk
 from .widgets import FAN_NAMES, button, dropdown, flow, label
@@ -13,9 +14,9 @@ class CurveEditor:
         self.drag = None
         row = flow()
         parent.append(row)
-        self.managed = Gtk.CheckButton(label='管理风扇曲线')
+        self.managed = Gtk.CheckButton(label=tr('curve.manage'))
         self.switcher = dropdown([])
-        self.enabled = Gtk.CheckButton(label='启用此曲线')
+        self.enabled = Gtk.CheckButton(label=tr('curve.enable'))
         for widget in (self.managed, self.switcher, self.enabled):
             row.insert(widget, -1)
         self.note = label('--', True)
@@ -34,7 +35,7 @@ class CurveEditor:
         for block in range(2):
             grid = Gtk.Grid(column_spacing=16, row_spacing=6, halign=Gtk.Align.CENTER)
             table.insert(grid, -1)
-            for column, text in enumerate(('点', '温度 °C', '风扇输出 %')):
+            for column, text in enumerate((tr('curve.point'), tr('curve.temperature'), tr('curve.output'))):
                 grid.attach(label(text, True), column, 0, 1, 1)
             for row_index in range(4):
                 index = block * 4 + row_index
@@ -76,7 +77,7 @@ class CurveEditor:
         for index, (temp, pwm) in enumerate(self.inputs):
             temp.set_value(curve['temp'][index] if curve else 0)
             pwm.set_value(pwm_percent(curve['pwm'][index]) if curve else 0)
-        self.note.set_label('重合点共用编号标记。可拖动曲线，也可编辑下方数值。' if curve else '请先读取方案曲线。')
+        self.note.set_label(tr('curve.edit_note') if curve else tr('curve.read_note'))
         self.sensitivity()
         self.plot.queue_draw()
 

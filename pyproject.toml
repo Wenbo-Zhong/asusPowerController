@@ -14,3 +14,6 @@ asus-power-controller = "asus_power.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["asus_power*"]
+
+[tool.setuptools.package-data]
+asus_power = ["locales/*.json"]

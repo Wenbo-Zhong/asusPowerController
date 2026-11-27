@@ -1,4 +1,5 @@
 from copy import deepcopy
+from asus_power.i18n import tr
 import unittest
 
 from asus_power.combinations import MODES, SOURCES, defaults
@@ -51,7 +52,7 @@ class CurveDraftTests(unittest.TestCase):
     def test_unmanaged_empty_draft_is_allowed_but_managed_requires_data(self):
         draft = CurveDraft()
         self.assertEqual(draft.export(False), {})
-        with self.assertRaisesRegex(ValueError, '读取方案曲线'):
+        with self.assertRaisesRegex(ValueError, tr('curve.read_first')):
             draft.export(True)
 
     def test_reload_preserves_existing_fan_selection_and_clears_missing_fans(self):

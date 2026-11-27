@@ -1,4 +1,5 @@
 import errno
+from asus_power.i18n import tr
 from types import SimpleNamespace
 import unittest
 from unittest.mock import MagicMock, patch
@@ -50,11 +51,11 @@ class InstanceTests(unittest.TestCase):
         self.assertEqual(set(clock.messages), {b'upgrade'})
 
     def test_unresponsive_instance_keeps_normal_deadline(self):
-        with self.assertRaisesRegex(RuntimeError, '超时'):
+        with self.assertRaisesRegex(RuntimeError, tr('instance.timeout')):
             self.acquire_with_clock(b'', 9.)
 
     def test_retry_to_normal_launch_does_not_remove_deadline(self):
-        with self.assertRaisesRegex(RuntimeError, '超时'):
+        with self.assertRaisesRegex(RuntimeError, tr('instance.timeout')):
             self.acquire_with_clock(b'retry', 9., upgrade=False)
 
     def test_untrusted_peer_cannot_acknowledge_replacement(self):

@@ -1,10 +1,11 @@
-"""Shared GTK construction and charging controls."""
+"""共用 GTK 控件、显示名称和充电上限输入；标识与译名分开维护。"""
+from ..i18n import tr
 from .gtk import Adw, Gtk
 
-MODENAMES = {'quiet': '静音', 'balanced': '均衡', 'performance': '性能',
-             'low-power': '节能', 'custom': '自定义'}
-EPP_NAMES = ('固件默认', '性能优先', '均衡偏性能', '均衡偏省电', '省电优先')
-FAN_NAMES = {'cpu': 'CPU 风扇', 'gpu': 'GPU 风扇', 'mid': '第三风扇'}
+MODENAMES = {'quiet': tr('mode.silent'), 'balanced': tr('mode.balanced'), 'performance': tr('mode.performance'),
+             'low-power': tr('mode.powersave'), 'custom': tr('mode.custom')}
+EPP_NAMES = (tr('epp.default'), tr('epp.performance'), tr('epp.balance_performance'), tr('epp.balance_power'), tr('epp.power'))
+FAN_NAMES = {'cpu': tr('fan.cpu'), 'gpu': tr('fan.gpu'), 'mid': tr('fan.mid')}
 
 
 def box(horizontal=False, spacing=10):
@@ -35,7 +36,7 @@ def button(text, callback):
 
 def confirm(window, title, body, action, callback):
     dialog = Adw.MessageDialog(transient_for=window, modal=True, heading=title, body=body)
-    dialog.add_response('cancel', '取消')
+    dialog.add_response('cancel', tr('common.cancel'))
     dialog.add_response('apply', action)
     dialog.set_close_response('cancel')
     dialog.connect('response::apply', lambda *_: callback())
@@ -81,11 +82,11 @@ class ChargeControls:
             try:
                 value = int(self.entry.get_text())
             except ValueError:
-                self.controller.status.set_label('请输入 20–100 的整数')
+                self.controller.status.set_label(tr('battery.enter_limit'))
                 return
             self.controller.submit(lambda: self.controller.backend.set_limit(value))
 
-        self.action = button('保存上限', apply)
+        self.action = button(tr('battery.save_limit'), apply)
         row.append(self.action)
         self.entry.set_sensitive(False)
         self.action.set_sensitive(False)

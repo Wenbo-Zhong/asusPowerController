@@ -9,6 +9,8 @@ import subprocess
 import sys
 
 PROJECT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT))
+from asus_power.i18n import LOCALE_ENV, tr
 
 
 def launch_command(start_hidden=False):
@@ -31,6 +33,7 @@ def authorization_command():
             'DBUS_SESSION_BUS_ADDRESS', f'unix:path=/run/user/{os.getuid()}/bus'),
         'XDG_CONFIG_HOME': os.environ.get('XDG_CONFIG_HOME') or str(home / '.config'),
     }
+    variables.update({key: os.environ[key] for key in LOCALE_ENV if key in os.environ})
     return [pkexec, '--disable-internal-agent', '/usr/bin/env',
             *(f'{key}={value}' for key, value in variables.items()),
             '/usr/bin/python3', '-I', str(Path(__file__).resolve()), '--authorized']
@@ -38,13 +41,12 @@ def authorization_command():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--start-hidden', action='store_true', help='启动到托盘')
-    parser.add_argument('--check', action='store_true', help='只显示启动命令')
+    parser.add_argument('--start-hidden', action='store_true', help=tr('launcher.hidden_help'))
+    parser.add_argument('--check', action='store_true', help=tr('launcher.check_help'))
     parser.add_argument('--authorized', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.authorized and (os.geteuid() != 0 or not os.environ.get('PKEXEC_UID')):
-        parser.error('需要先完成管理员授权')
-    sys.path.insert(0, str(PROJECT))
+        parser.error(tr('launcher.admin_required'))
     from asus_power.config import load
 
     command = launch_command(args.start_hidden)

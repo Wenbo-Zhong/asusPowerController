@@ -1,4 +1,4 @@
-"""Shared system-battery discovery and effective external-power detection."""
+"""共用系统电池发现与供电判定；排除外设电池，按系统电池/交流状态消歧。"""
 from pathlib import Path
 from .battery import text
 
@@ -19,7 +19,7 @@ def external_power(supplies, battery):
         return True
     status = text(battery / 'status') if battery is not None else None
     if status == 'Discharging':
-        # An active USB-C PD link alone does not prove external power.
+        # USB-C PD 链路在线不等于电脑正在由外部供电，还要结合系统电池状态。
         return False
     if status == 'Charging':
         return True

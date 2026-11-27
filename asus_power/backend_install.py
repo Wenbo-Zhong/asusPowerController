@@ -1,4 +1,5 @@
-"""Install the administrator-owned backend package shipped with the Ubuntu DEB."""
+"""安装 Ubuntu 界面包附带的后端；仅执行经过所有权检查的固定安装器。"""
+from .i18n import tr
 from pathlib import Path
 import os
 import shutil
@@ -36,17 +37,17 @@ def service_active():
 
 def install():
     if not available():
-        raise RuntimeError('未找到随界面包安装的后端')
+        raise RuntimeError(tr('backend_install.not_bundled'))
     command = [str(INSTALLER)]
     if os.geteuid() != 0:
         pkexec = shutil.which('pkexec')
         if not pkexec:
-            raise RuntimeError('系统没有可用的管理员授权工具')
+            raise RuntimeError(tr('backend_install.no_authorizer'))
         command[:0] = [pkexec, '--disable-internal-agent']
     result = subprocess.run(command, capture_output=True, text=True, timeout=300)
     if result.returncode == 126:
-        return '已取消安装后端服务'
+        return tr('backend_install.cancelled')
     if result.returncode:
         lines = (result.stderr or result.stdout).splitlines()
-        raise RuntimeError('\n'.join(lines[-6:]) or f'安装程序退出码 {result.returncode}')
-    return '后端服务已安装并启动。请退出托盘中的应用后重新打开，以重新检测硬件。'
+        raise RuntimeError('\n'.join(lines[-6:]) or tr('backend_install.exit_code', returncode=result.returncode))
+    return tr('backend_install.completed')

@@ -1,4 +1,12 @@
-"""Linux CPU pressure monitor and read-only EPP recommendations."""
+"""采样 Linux CPU/PSI 并提供只读 EPP 建议；实际联动写入由 asusd 负责。"""
+if __package__:
+    from .i18n import tr
+else:
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from i18n import tr
+
 import argparse
 from dataclasses import dataclass
 import json
@@ -40,7 +48,7 @@ def read_load(proc=Path('/proc')):
         if not line.startswith('cpu'):
             break
         name, *fields = line.split()
-        # Guest time is already included in user and nice.
+        # guest 时间已计入 user/nice，不能再次累加。
         cpu[name] = tuple(map(int, fields[:8]))
     stalls = {}
     for resource in ('cpu', 'io', 'memory'):
@@ -97,8 +105,7 @@ class Policy:
 
         if target != self.pending:
             self.pending, self.since = target, now
-        # Respond immediately to queueing or broad saturation, confirm single-core
-        # bursts briefly, and wait longer before turning performance back down.
+        # 排队或整体饱和立即升档；短暂单核突发先确认，降档使用更长的等待时间。
         if target < self.level:
             delay = 8
         elif urgent:
@@ -140,12 +147,12 @@ def monitor(args, stop):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='监控 Linux CPU 压力并建议 EPP 档位')
-    parser.add_argument('--interval', type=float, default=1, help='采样间隔（秒，0.5–5）')
-    parser.add_argument('--samples', type=int, default=0, help='输出指定数量的样本后退出')
+    parser = argparse.ArgumentParser(description=tr('epp.description'))
+    parser.add_argument('--interval', type=float, default=1, help=tr('epp.interval_help'))
+    parser.add_argument('--samples', type=int, default=0, help=tr('epp.samples_help'))
     args = parser.parse_args(argv)
     if not 0.5 <= args.interval <= 5 or args.samples < 0:
-        parser.error('interval 必须在 0.5–5 秒内，samples 必须非负')
+        parser.error(tr('epp.invalid_arguments'))
     stop = Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: stop.set())

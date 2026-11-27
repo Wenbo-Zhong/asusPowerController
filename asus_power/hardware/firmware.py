@@ -1,4 +1,5 @@
-"""Read the installed BIOS version and query fwupd for system BIOS updates."""
+"""读取 DMI BIOS 版本并查询 fwupd；仅检查更新，支持链接供用户核对机型。"""
+from ..i18n import tr
 import json
 import os
 from pathlib import Path
@@ -28,10 +29,10 @@ def check_bios_updates(runner=subprocess.run):
             result = runner(['fwupdmgr', *arguments, '--json'], capture_output=True, text=True,
                             timeout=45, env={**os.environ, 'LC_ALL': 'C'})
         except FileNotFoundError as error:
-            raise RuntimeError('未安装 fwupd，请使用 ASUS 支持页面查询') from error
+            raise RuntimeError(tr('firmware.fwupd_missing')) from error
         if result.returncode not in (0, 2):
             detail = (result.stderr or result.stdout).strip()
-            raise RuntimeError(detail or f'fwupdmgr 退出码 {result.returncode}')
+            raise RuntimeError(detail or tr('firmware.exit_code', returncode=result.returncode))
         return result.stdout
 
     devices = json.loads(run('get-devices') or '{}').get('Devices', [])
@@ -39,7 +40,7 @@ def check_bios_updates(runner=subprocess.run):
               if device.get('Name') == 'System Firmware' and device.get('Plugin') == 'uefi_capsule'
               and device.get('DeviceId')]
     if len(system) != 1:
-        return 'fwupd 未识别到唯一的系统 BIOS，请核对 ASUS 支持页面。'
+        return tr('firmware.ambiguous')
 
     run('refresh')
     device = system[0]
@@ -49,5 +50,5 @@ def check_bios_updates(runner=subprocess.run):
             continue
         versions = [release['Version'] for release in update.get('Releases', []) if release.get('Version')]
         if versions:
-            return 'fwupd 可用的 BIOS 更新版本 ' + '、'.join(dict.fromkeys(versions))
-    return 'fwupd 未提供 BIOS 更新，仍可核对 ASUS 支持页面。'
+            return tr('firmware.available_prefix') + tr('common.list_separator').join(dict.fromkeys(versions))
+    return tr('firmware.no_update')

@@ -1,3 +1,5 @@
+"""读写用户配置；提权后仍保持原用户所有权，使用原子替换避免半写入。"""
+from .i18n import tr
 import json
 import os
 import pwd
@@ -34,7 +36,7 @@ def save(value, path=None):
             if created_directory and os.fstat(directory).st_uid == 0:
                 os.fchown(directory, user.pw_uid, user.pw_gid)
             if os.fstat(directory).st_uid != user.pw_uid:
-                raise PermissionError('配置目录不属于发起授权的用户')
+                raise PermissionError(tr('config.wrong_owner'))
         name = f'.{path.name}.{secrets.token_hex(16)}.tmp'
         descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                              0o600, dir_fd=directory)
@@ -56,7 +58,7 @@ def save(value, path=None):
 
 
 class Policy:
-    """Apply once per power transition; retry only after a new transition."""
+    """每次供电变化只触发一次；下一次变化前不重复覆盖手动选择。"""
     def __init__(self):
         self.previous = None
 

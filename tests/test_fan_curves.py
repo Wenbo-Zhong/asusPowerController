@@ -1,4 +1,5 @@
 from copy import deepcopy
+from asus_power.i18n import tr
 import json
 import subprocess
 import unittest
@@ -56,7 +57,7 @@ class FanApiTests(unittest.TestCase):
     def test_readback_mismatch_restores_previous_curve(self):
         self.ignore = True
         curve = dict(deepcopy(FACTORY), enabled=False)
-        with self.assertRaisesRegex(RuntimeError, '回读'):
+        with self.assertRaisesRegex(RuntimeError, tr('fan.readback_mismatch')):
             self.api.save('balanced', curve)
         self.assertEqual(self.curves['cpu'], FACTORY)
 

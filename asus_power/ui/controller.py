@@ -1,4 +1,5 @@
-"""Application lifecycle, background work and automatic hardware policy."""
+"""主窗口生命周期、后台采样与自动策略；连接各页面、配置及 backend。"""
+from ..i18n import tr
 from concurrent.futures import ThreadPoolExecutor
 import os
 
@@ -33,7 +34,7 @@ class Controller:
         self.settings = load()
         self.closing = False
         self.tray = None
-        self.window = Adw.ApplicationWindow(application=app, title='电脑管家', default_width=900,
+        self.window = Adw.ApplicationWindow(application=app, title=tr('app.name'), default_width=900,
                                             default_height=740, icon_name='preferences-system-power')
         self.loop = DesktopLoop(lambda: 'normal' if self.window.get_visible() else 'withdrawn')
         self.window.connect('close-request', self.close_window)
@@ -62,7 +63,7 @@ class Controller:
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         self.stack = Gtk.Stack(vexpand=True, hhomogeneous=False)
-        header.set_title_widget(Adw.WindowTitle(title='电脑管家'))
+        header.set_title_widget(Adw.WindowTitle(title=tr('app.name')))
         toolbar.add_top_bar(header)
         content = box(spacing=0)
         toolbar.set_content(content)
@@ -72,12 +73,12 @@ class Controller:
         navigation.append(Gtk.StackSwitcher(stack=self.stack, halign=Gtk.Align.START))
         content.append(navigation)
         content.append(self.stack)
-        self.status = label('正在读取硬件…', subdued=True)
+        self.status = label(tr('app.reading'), subdued=True)
         self.status.add_css_class('dashboard-status')
         content.append(self.status)
         pages = {}
-        for name, title in [('overview', '概览'), ('performance', '性能与散热'),
-                            ('battery', '电池'), ('settings', '设置')]:
+        for name, title in [('overview', tr('page.overview')), ('performance', tr('page.performance')),
+                            ('battery', tr('page.battery')), ('settings', tr('page.settings'))]:
             page = box()
             pages[name] = page
             if name != 'performance':
@@ -88,7 +89,7 @@ class Controller:
         self.battery = BatteryPage(self, pages['battery'])
         self.settings_page = SettingsPage(self, pages['settings'])
         if preset_error:
-            self.performance.editor.note.set_label('旧组合无法读取：' + preset_error)
+            self.performance.editor.note.set_label(tr('app.old_combination', error=preset_error))
         if not start_hidden:
             self.window.present()
         self.submit(self.detect, self.ready)
@@ -125,6 +126,8 @@ class Controller:
         self.app.quit()
 
     def submit(self, operation, done=None, finished=None, executor=None, error=None):
+        # 硬件/磁盘操作在线程池执行；所有控件更新和完成回调回到 GLib 主线程。
+        # 关闭窗口后丢弃排队的界面回调，避免访问已销毁的 GTK 控件。
         future = (executor or self.pool).submit(operation)
 
         def receive():
@@ -137,7 +140,7 @@ class Controller:
                 elif isinstance(result, str):
                     self.status.set_label(result)
             except Exception as failure:
-                message = f'失败：{failure}'
+                message = tr('app.failed', failure=failure)
                 self.status.set_label(message)
                 if error is not None and error is not self.status:
                     error.set_label(message)
@@ -174,7 +177,7 @@ class Controller:
         try:
             save(proposed)
         except OSError as error:
-            self.status.set_label(f'保存失败：{error}')
+            self.status.set_label(tr('app.save_failed', error=error))
             return False
         self.settings = proposed
         return True
@@ -184,7 +187,7 @@ class Controller:
         self.mode_keys = self.caps['profiles']
         for page in (self.overview, self.performance, self.battery, self.settings_page):
             page.ready(self.caps)
-        self.status.set_label('准备好了')
+        self.status.set_label(tr('app.ready'))
         self.tick()
 
     def tick(self):
@@ -204,6 +207,7 @@ class Controller:
         request = self.combination_policy.request(state, self.combinations)
         if request and (request[2]['power'] or request[2]['fans']):
             revision = self.combination_policy.revision
+            # 入队不等于已执行；开始写硬件前必须再次验证保存版本与上下文。
             self.submit(lambda: self.combination_policy.run_pending(
                 request, revision, self.combinations, self.backend.apply_combination))
 
@@ -229,8 +233,8 @@ class Controller:
                     self.keyboard_idle = KeyboardIdle(connection, Gio, GLib)
                 self.keyboard_idle.update(seconds)
             except GLib.Error:
-                return '当前会话无法检测闲置时间或控制键盘灯。'
-            return '恢复键盘或鼠标活动时会还原亮度。'
+                return tr('keyboard.session_unavailable')
+            return tr('keyboard.activity_note')
 
         self.submit(update, self.settings_page.keyboard_note.set_label,
                     finished=lambda: setattr(self, 'keyboard_busy', False))
@@ -238,7 +242,7 @@ class Controller:
 
 def launch(start_hidden=False):
     GLib.set_prgname('asus-power-controller')
-    GLib.set_application_name('ASUS Power Controller')
+    GLib.set_application_name(tr('app.name'))
     instance = Instance(start_hidden)
     if not instance.acquire():
         return

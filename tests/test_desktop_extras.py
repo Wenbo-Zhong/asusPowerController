@@ -1,4 +1,5 @@
 import json
+from asus_power.i18n import tr
 import subprocess
 import unittest
 from unittest.mock import Mock
@@ -32,5 +33,5 @@ class DesktopExtrasTests(unittest.TestCase):
                 {'DeviceId': 'bios', 'Releases': [{'Version': '321'}]},
             ]}), ''),
         ])
-        self.assertEqual(check_bios_updates(runner), 'fwupd 可用的 BIOS 更新版本 321')
+        self.assertEqual(check_bios_updates(runner), tr('firmware.available_prefix') + '321')
         self.assertEqual(runner.call_args.args[0], ['fwupdmgr', 'get-updates', 'bios', '--json'])

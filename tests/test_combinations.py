@@ -2,6 +2,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
+from asus_power.i18n import tr
 
 from asus_power.combinations import (CombinationApplier, CombinationPolicy, defaults,
                                      effective, normalized)
@@ -63,7 +64,7 @@ class ApplyTests(unittest.TestCase):
 
     def test_applies_all_components_and_checks_readbacks(self):
         message = self.api.apply('balanced', 'ac', self.entry)
-        self.assertIn('已应用 均衡 · 插电', message)
+        self.assertIn(tr('combination.applied', label=tr('mode.balanced') + tr('combination.ac_suffix')), message)
         self.assertEqual(self.values['ppt_pl1_spl']['current'], 40)
         self.assertFalse(self.curves['cpu']['enabled'])
 
@@ -78,7 +79,7 @@ class ApplyTests(unittest.TestCase):
 
     def test_last_component_failure_restores_power_fans_and_enable_flag(self):
         self.api.fans.save = Mock(side_effect=RuntimeError('fan denied'))
-        with self.assertRaisesRegex(RuntimeError, '已恢复原设置'):
+        with self.assertRaisesRegex(RuntimeError, tr('recovery.restored_suffix')):
             self.api.apply('balanced', 'ac', self.entry)
         self.assertEqual(self.values['ppt_pl1_spl']['current'], 60)
         self.assertEqual(self.curves['cpu'], CURVE)
@@ -91,7 +92,7 @@ class ApplyTests(unittest.TestCase):
             self.context['ac'] = False
             return result
         self.api.power.apply = transition
-        with self.assertRaisesRegex(RuntimeError, '未向新组合写回旧值'):
+        with self.assertRaisesRegex(RuntimeError, tr('combination.aborted_context', error=tr('combination.context_changed'))):
             self.api.apply('balanced', 'ac', self.entry)
         self.assertEqual(self.values['ppt_pl1_spl']['current'], 40)
         self.assertNotIn(('power', 'ppt_pl1_spl', 60), self.calls)
@@ -103,10 +104,11 @@ class ApplyTests(unittest.TestCase):
         self.api.power.pending = lambda name: pending.get(name)
         def queued(name, value):
             pending[name] = value
-            return '已排队，独显唤醒后生效'
+            # 接口可返回任意语言；组合状态只能依赖 pending 的真实值。
+            return 'Deferred by firmware'
         self.api.power.apply = queued
         result = self.api.apply('balanced', 'ac', {'power': {'nv_tgp': 80}, 'fans': {}})
-        self.assertIn('排队', result)
+        self.assertIn(tr('combination.queued_suffix'), result)
         self.assertEqual(self.values['nv_tgp']['current'], 75)
 
     def test_gpu_manager_leaves_saved_gpu_values_and_applies_cpu_and_fans(self):
@@ -118,6 +120,15 @@ class ApplyTests(unittest.TestCase):
         self.assertIn(('fan', False), self.calls)
         self.assertNotIn(('power', 'nv_tgp', 80), self.calls)
         self.assertEqual(self.entry['power']['nv_tgp'], 80)
+
+    def test_message_text_does_not_create_a_false_pending_state(self):
+        original = self.api.power.apply
+        def misleading(name, value):
+            original(name, value)
+            return '排队'
+        self.api.power.apply = misleading
+        result = self.api.apply('balanced', 'ac', self.entry)
+        self.assertNotIn(tr('combination.queued_suffix'), result)
 
     def test_empty_entry_leaves_all_hardware_unchanged(self):
         self.api.apply('balanced', 'ac', {'power': {}, 'fans': {}})
@@ -139,7 +150,7 @@ class ApplyTests(unittest.TestCase):
             save(mode, curve)
             self.values['ppt_pl1_spl']['current'] = 80
         self.api.fans.save = override
-        with self.assertRaisesRegex(RuntimeError, '外部服务修改'):
+        with self.assertRaisesRegex(RuntimeError, tr('combination.power_overridden')):
             self.api.apply('balanced', 'ac', self.entry)
         self.assertEqual(self.values['ppt_pl1_spl']['current'], 60)
         self.assertEqual(self.curves['cpu'], CURVE)

@@ -18,6 +18,16 @@ spec.loader.exec_module(launcher)
 
 
 class DesktopLauncherTests(unittest.TestCase):
+    def test_authorization_preserves_only_explicit_locale_variables(self):
+        env = {'LANG': 'en_US.UTF-8', 'LC_MESSAGES': 'zh_TW.UTF-8',
+               'LC_ALL': '', 'LANGUAGE': 'zh_TW:en', 'PYTHONPATH': '/untrusted'}
+        with patch.dict(os.environ, env, clear=True), \
+                patch.object(launcher.shutil, 'which', return_value='/usr/bin/pkexec'):
+            command = launcher.authorization_command()
+        for key in ('LANG', 'LC_MESSAGES', 'LC_ALL', 'LANGUAGE'):
+            self.assertIn(f'{key}={env[key]}', command)
+        self.assertNotIn('PYTHONPATH=/untrusted', command)
+
     def test_desktop_launch_uses_current_user(self):
         with patch('sys.argv', ['desktop_launcher']), \
                 patch('asus_power.config.load', return_value={}), \

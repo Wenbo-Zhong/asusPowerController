@@ -1,1 +1,1 @@
-"""Hardware discovery and validated asusd operations."""
+"""硬件探测与 asusd 功能接口；各功能负责自身的校验、回读与恢复。"""

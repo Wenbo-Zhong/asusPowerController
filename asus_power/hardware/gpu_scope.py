@@ -1,4 +1,4 @@
-"""Identify PCI graphics devices without opening GPU driver interfaces."""
+"""仅凭 PCI 元数据识别机身和外接显卡，避免探测过程唤醒休眠独显。"""
 import re
 
 

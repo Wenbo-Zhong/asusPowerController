@@ -1,4 +1,5 @@
-"""Temperature, fan telemetry and validated APU controls."""
+"""实时散热页：只读温度/转速，核显写操作交由 backend 校验并提权。"""
+from ..i18n import tr
 from .gtk import Gtk
 from .widgets import box, button, card, flow, fmt, label
 
@@ -6,12 +7,12 @@ from .widgets import box, button, card, flow, fmt, label
 class CoolingPage:
     def __init__(self, controller, page):
         self.controller = controller
-        readings = card(page, '实时温度与转速')
+        readings = card(page, tr('cooling.live_title'))
         columns = flow(maximum=2, homogeneous=True)
         readings.append(columns)
         self.sensor_columns = {}
         self.sensor_rows = {'temperature': {}, 'fan': {}}
-        for key, heading in [('temperature', '温度'), ('fan', '风扇转速')]:
+        for key, heading in [('temperature', tr('cooling.temperature')), ('fan', tr('cooling.fan_speed'))]:
             column = box(spacing=6)
             columns.insert(column, -1)
             column.append(label(heading, True))
@@ -19,10 +20,10 @@ class CoolingPage:
             values.append(label())
             column.append(values)
             self.sensor_columns[key] = values
-        shortcut = button('编辑风扇曲线', self.show_fans)
+        shortcut = button(tr('cooling.edit_fans'), self.show_fans)
         shortcut.set_halign(Gtk.Align.START)
         readings.append(shortcut)
-        gpu = card(page, '核显最高频率')
+        gpu = card(page, tr('cooling.igpu_title'))
         self.gpu_status = label()
         gpu.append(self.gpu_status)
         row = box(True)
@@ -32,9 +33,9 @@ class CoolingPage:
         row.append(label('MHz'))
         actions = flow()
         gpu.append(actions)
-        self.gpu_apply = button('应用', self.apply_gpu)
-        self.gpu_reset = button('恢复自动调频', lambda: self.gpu_operation(controller.backend.set_igpu_max))
-        self.gpu_install = button('安装控制组件', lambda: self.gpu_operation(controller.backend.install_igpu_helper))
+        self.gpu_apply = button(tr('common.apply'), self.apply_gpu)
+        self.gpu_reset = button(tr('cooling.auto'), lambda: self.gpu_operation(controller.backend.set_igpu_max))
+        self.gpu_install = button(tr('cooling.install_helper'), lambda: self.gpu_operation(controller.backend.install_igpu_helper))
         for widget in (self.gpu_apply, self.gpu_reset, self.gpu_install):
             actions.insert(widget, -1)
             widget.set_sensitive(False)
@@ -79,7 +80,7 @@ class CoolingPage:
         try:
             value = int(self.gpu_target.get_text())
         except ValueError:
-            self.controller.status.set_label('请输入整数 MHz')
+            self.controller.status.set_label(tr('cooling.integer_required'))
             return
         self.gpu_operation(lambda: self.controller.backend.set_igpu_max(value))
 
@@ -104,8 +105,10 @@ class CoolingPage:
         for widget in (self.gpu_apply, self.gpu_reset, self.gpu_target):
             widget.set_sensitive(bool(ready and not self.gpu_busy))
         if supported:
-            self.gpu_status.set_label(f"当前 {fmt(info.get('frequency_mhz'), ' MHz')} · 上限 {info['maximum']} MHz"
-                                      f" · {info['mode']} · 范围 {info['minimum']}–{info['upper']} MHz")
+            self.gpu_status.set_label(tr('cooling.igpu_reading',
+                                      frequency=fmt(info.get('frequency_mhz'), ' MHz'),
+                                      maximum=info['maximum'], mode=info['mode'],
+                                      minimum=info['minimum'], upper=info['upper']))
             if update_input or self.gpu_target.get_text() == '--':
                 self.gpu_target.set_text(str(info['maximum']))
         else:

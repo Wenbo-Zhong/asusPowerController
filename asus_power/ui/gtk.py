@@ -1,4 +1,4 @@
-"""Load the GTK versions used by every view."""
+"""统一加载 GTK 4/libadwaita/Cairo 版本，供所有页面复用。"""
 import gi
 
 gi.require_version('Gtk', '4.0')

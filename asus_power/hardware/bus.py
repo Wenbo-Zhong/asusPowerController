@@ -1,4 +1,5 @@
-"""Small system-bus transport; hardware validation belongs to each feature."""
+"""共用 busctl 传输与 JSON 解码；硬件语义校验留在调用此模块的各功能中。"""
+from ..i18n import tr
 import json
 import subprocess
 
@@ -8,7 +9,7 @@ PLATFORM = 'xyz.ljones.Platform'
 
 
 class BusClient:
-    def __init__(self, runner=subprocess.run, *, timeout=8, error='asusd 接口调用失败'):
+    def __init__(self, runner=subprocess.run, *, timeout=8, error=tr('bus.call_failed')):
         self.runner = runner
         self.timeout = timeout
         self.error = error

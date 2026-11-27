@@ -1,4 +1,6 @@
 import os
+from asus_power.i18n import tr
+import re
 from pathlib import Path
 import stat
 from tempfile import TemporaryDirectory
@@ -74,7 +76,7 @@ class ConfigTests(unittest.TestCase):
                 patch('asus_power.config.os.geteuid', return_value=0), \
                 patch('asus_power.config.pwd.getpwuid', return_value=user), \
                 patch('asus_power.config.os.fchown') as chown:
-            with self.assertRaisesRegex(PermissionError, '配置目录'):
+            with self.assertRaisesRegex(PermissionError, re.escape(tr('config.wrong_owner'))):
                 save({'enabled': True}, self.path)
         chown.assert_not_called()
         self.assertEqual(list(self.path.parent.iterdir()), [])

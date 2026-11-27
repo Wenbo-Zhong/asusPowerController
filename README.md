@@ -2,6 +2,8 @@
 
 为华硕笔记本打造的轻量 Linux 桌面控制器：借鉴 G-Helper 的紧凑操作与供电策略，结合 ROG Control Center 的能力检测与 asusd 后端。
 
+Translations: see the [English translation contribution guide](docs/TRANSLATING.md). New languages can be contributed as a single JSON file.
+
 **当前版本：0.1.0 / Linux MVP。** 可运行，不是两个上游项目的完整替代品。详细功能对比、源码参考和局限见 [分析文档](docs/COMPARISON.md)。
 
 ## 运行
@@ -48,6 +50,7 @@ sh packaging/build.sh deb dist dist-backend/asusctl_VERSION_amd64.deb
 ## 已实现
 
 - 圆角卡片与控件，深浅主题跟随系统的桌面界面；异步读取和命令执行。
+- 界面、托盘及应用提示按系统消息语言自动使用简体中文、繁体中文或英文；未提供翻译的语言使用英文。
 - 四个主标签：「概览」查看状态和立即切换运行方式；「性能与散热」集中实时状态、模式联动、功耗和风扇；「电池」管理充电及查看容量、设备信息；「设置」管理启动、键盘灯光和 BIOS。
 - 「设置 → 启动与托盘」可设置登录自启动。关窗后继续在托盘运行，托盘菜单可彻底退出。登录自启动使用普通用户权限。
 - 自动发现性能模式，手动切换并回读实际状态。
@@ -79,6 +82,7 @@ sh packaging/build.sh deb dist dist-backend/asusctl_VERSION_amd64.deb
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q asus_power
+python3 scripts/check_translations.py --strict
 ```
 
 测试使用临时 sysfs 和模拟命令，涵盖参数拒绝、USB 供电、读取异常、回读失败、命令错误、曲线验证、供电策略和配置恢复，不写入真实硬件。
@@ -95,7 +99,35 @@ GTK 4 使用桌面的分辨率缩放和系统字体。libadwaita 跟随系统深
 
 `asus_power/ui/` 保存各页面、风扇编辑器、共享控件和不依赖 GTK 的草稿状态；`ui/controller.py` 负责程序生命周期、后台采样和策略调度。`performance_page.py` 组合实时状态、`mode_settings.py` 的模式联动和 `combination_editor.py` 的功耗／风扇草稿；`settings_page.py` 管理启动、灯光与 BIOS。`asus_power/hardware/` 保存硬件探测与 asusd 功能，共用 `BusClient` 处理 D-Bus 命令和 JSON；各功能独立校验、回读及恢复。
 
-`backend.py` 是界面使用的硬件入口，`config.py` 和 `combinations.py` 负责配置与组合策略。独立提权运行的 `igpu.py` 保持单文件，不依赖界面或包内导入。启动器、托盘及配置路径不随界面分文件而改变。DEB / RPM 共用的安装流程递归包含子包，排除缓存和系统隐藏文件。
+`backend.py` 是界面使用的硬件入口，`config.py` 和 `combinations.py` 负责配置与组合策略。独立提权运行的 `igpu.py` 只依赖标准库、同目录的 `i18n.py` 和 JSON 语言文件；安装时一起复制并检查所有权。DEB / RPM 和 Python wheel 均包含语言资源，桌面名称从同一份译文生成。
+
+修改功能时可从以下位置入手：
+
+| 修改内容 | 入口及必须保留的边界 |
+| --- | --- |
+| 界面布局与交互 | `ui/` 对应页面；GTK 控件只在主线程更新，硬件操作经 `Controller.submit/perform` |
+| 六套功耗/风扇草稿 | `ui/drafts.py`、`ui/combination_editor.py`；切换草稿不写硬件，保存与立即应用独立 |
+| 自动应用与失败恢复 | `combinations.py`；任务执行前检查版本与上下文，供电或模式改变后禁止恢复旧值 |
+| EPP 方案规则 | `ui/mode_settings.py`、`hardware/profile_epp.py`；直接保存到 asusd，与六套组合独立 |
+| 风扇数据与 PWM | `hardware/fan_curves.py`、`ui/drafts.py`；保留重复温度点和原始 PWM 字节 |
+| 硬件支持与回读 | `backend.py`、`hardware/`；范围来自驱动，设置成功必须通过回读确认 |
+| 界面文字与新语言 | `asus_power/locales/*.json`、`i18n.py`；固定消息键与命名占位符，[贡献指南](docs/TRANSLATING.md) |
+
+模块职责和关键约束使用简体中文注释，技术标识保留原名。新增注释优先解释设计原因和修改时必须保持的边界。
+
+## 语言与翻译
+
+进程启动时按 `LC_ALL`、`LC_MESSAGES`、`LANG` 的优先级读取消息语言，遵循 GNU `LANGUAGE` 的候选列表；`C`/`POSIX` 始终使用英文。`zh_CN`、`zh_SG` 和 `zh_Hans` 使用简体中文，`zh_TW`、`zh_HK`、`zh_MO` 和 `zh_Hant` 使用繁体中文，显式文字标记优先于地区。其他未收录语言使用英文。
+
+语言文件集中在 `asus_power/locales/`，`en.json` 是完整基准，`zh_Hans.json`、`zh_Hant.json` 提供中文译文。新增 `de.json`、`pt_BR.json` 等文件后可自动识别，无需修改语言注册代码；缺失的单条消息使用英文。应用不提供手动语言设置，修改系统语言后重新启动生效。底层工具返回的原始诊断、硬件属性和配置键保留原值。
+
+```bash
+python3 scripts/check_translations.py --new de
+python3 scripts/check_translations.py
+python3 scripts/check_translations.py --strict
+```
+
+提权启动保留桌面消息语言，托盘继承相同环境，核显助手接收主进程已解析的语言。添加新语言后重新构建安装包；已安装的核显组件需重新点击「安装控制组件」以同步语言资源。
 
 ## 自适应 CPU EPP
 
@@ -112,7 +144,8 @@ python3 -m asus_power.epp --samples 12
 `suggested_epp` 是策略建议，`applied_epp` 是已应用的档位，只观察时为 `null`。部署为 systemd 服务后默认仍然只观察：
 
 ```bash
-sudo install -Dm0644 asus_power/epp.py /usr/local/lib/asus-power-controller/epp.py
+sudo install -Dm0644 -t /usr/local/lib/asus-power-controller \
+    asus_power/epp.py asus_power/i18n.py asus_power/locales/*.json
 sudo install -Dm0644 contrib/systemd/asus-power-epp.service /etc/systemd/system/asus-power-epp.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now asus-power-epp.service
@@ -127,7 +160,7 @@ journalctl -u asus-power-epp.service -f
 
 当前支持已识别的 AMD Strix Point 核显（PCI ID `1002:150e`），本机驱动提供 600–2900 MHz 范围。应用上限后使用驱动的 manual 模式，恢复自动调频会重置原厂 SCLK 范围并切回 auto。上下限以驱动实际报告为准。
 
-组件安装在 `/usr/local/lib/asus-power-controller/igpu.py`，由 root 所有。界面通过 `pkexec /usr/bin/python3 -I` 调用这个组件。组件重新识别 PCI 设备并校验频率范围，提交后回读，提交或回读失败时尝试恢复原频率范围及模式。后台采样只读取状态，应用启动时不会自动设置核显频率。
+组件安装在 `/usr/local/lib/asus-power-controller/igpu.py`，同目录包含 `i18n.py` 及 JSON 语言文件，均由 root 所有。界面通过 `pkexec /usr/bin/python3 -I` 调用组件并传入消息语言。组件重新识别 PCI 设备并校验频率范围，提交后回读，提交或回读失败时尝试恢复原频率范围及模式。后台采样只读取状态，应用启动时不会自动设置核显频率。
 
 这是频率限制，功耗仍随负载变化。本机已验证只读探测，写入、恢复与失败回滚通过模拟驱动接口验证。
 

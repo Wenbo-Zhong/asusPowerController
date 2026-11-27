@@ -1,4 +1,5 @@
-"""Firmware-bounded power settings through asusd, verified against sysfs."""
+"""按固件范围经 asusd 调节功率；以 sysfs 当前值和待应用值确认结果。"""
+from ..i18n import tr
 import json
 from pathlib import Path
 import subprocess
@@ -7,14 +8,14 @@ from .gpu_scope import external_pci, read_metadata
 from .power_supply import discover, external_power
 
 ATTRIBUTES = {
-    'ppt_pl1_spl': '处理器持续功率（SPL / PL1）',
-    'ppt_pl2_sppt': '处理器慢速加速功率（SPPT / PL2）',
-    'ppt_pl3_fppt': '处理器快速加速功率（FPPT / PL3）',
-    'ppt_apu_sppt': 'APU 加速功率',
-    'ppt_platform_sppt': '平台加速功率',
-    'nv_temp_target': '独显温度上限',
-    'nv_tgp': '独显功率上限（TGP）',
-    'nv_dynamic_boost': '独显动态加速功率（Dynamic Boost）',
+    'ppt_pl1_spl': tr('power.cpu_sustained'),
+    'ppt_pl2_sppt': tr('power.cpu_slow'),
+    'ppt_pl3_fppt': tr('power.cpu_fast'),
+    'ppt_apu_sppt': tr('power.apu_boost'),
+    'ppt_platform_sppt': tr('power.platform_boost'),
+    'nv_temp_target': tr('power.gpu_temperature'),
+    'nv_tgp': tr('power.gpu_tgp'),
+    'nv_dynamic_boost': tr('power.gpu_boost'),
 }
 ARMOURY = 'xyz.ljones.AsusArmoury'
 GPU_MANAGER = 'io.github.usb4gpumanager.Manager'
@@ -28,7 +29,7 @@ def attribute_unit(name):
 class PowerLimits:
     def __init__(self, root=Path('/sys'), runner=subprocess.run):
         self.root = Path(root)
-        self.bus = BusClient(runner, timeout=12, error='功率控制接口调用失败')
+        self.bus = BusClient(runner, timeout=12, error=tr('power.call_failed'))
         self.attributes = self.root / 'class/firmware-attributes/asus-armoury/attributes'
 
     def get(self, path, interface, property_name):
@@ -37,7 +38,7 @@ class PowerLimits:
     def enabled(self):
         value = self.get('/xyz/ljones', PLATFORM, 'EnablePptGroup')
         if type(value) is not bool:
-            raise ValueError('asusd 功率开关接口格式不兼容')
+            raise ValueError(tr('power.switch_incompatible'))
         return value
 
     def context(self):
@@ -61,22 +62,22 @@ class PowerLimits:
                 if type(enabled) is not bool:
                     raise ValueError('unknown GPU automation state')
                 if enabled:
-                    return 'USB4 GPU Manager 已开启自动显卡管理'
+                    return tr('power.gpu_manager')
         except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError):
-            return '无法确认独显管理权，已暂停独显调节'
+            return tr('power.ownership_unknown')
 
         devices = [path.resolve() for path in (self.root / 'bus/pci/devices').glob('*')
                    if read_metadata(path / 'class').startswith('0x03')]
         if any(external_pci(device) for device in devices):
-            return '检测到外接显卡，已暂停独显调节'
+            return tr('power.external_gpu')
         internal = [device for device in devices if read_metadata(device / 'vendor') == '0x10de']
         if len(internal) != 1:
-            return '无法确认唯一的机身 NVIDIA 独显'
+            return tr('power.ambiguous_gpu')
         device = internal[0]
         if (device / 'driver').resolve().name != 'nvidia':
-            return '机身独显未由 NVIDIA 驱动管理'
+            return tr('power.gpu_wrong_driver')
         if read_metadata(device / 'power/runtime_status') != 'active':
-            return '机身独显未处于活动状态'
+            return tr('power.gpu_inactive')
         return ''
 
     def read_attributes(self, gpu_block=None):
@@ -107,7 +108,7 @@ class PowerLimits:
         gpu_block = self.gpu_block_reason()
         values = self.read_attributes(gpu_block)
         if not values:
-            return {'supported': False, 'attributes': {}, 'reason': gpu_block or '当前驱动未开放可调功率接口',
+            return {'supported': False, 'attributes': {}, 'reason': gpu_block or tr('power.no_interface'),
                     'gpu_block': gpu_block}
         try:
             for name, data in values.items():
@@ -119,12 +120,12 @@ class PowerLimits:
 
     def set_enabled(self, enabled):
         if type(enabled) is not bool:
-            raise ValueError('无效的功率调节开关')
+            raise ValueError(tr('power.invalid_switch'))
         context = self.context()
         self.bus.put('/xyz/ljones', PLATFORM, 'EnablePptGroup', 'b', enabled)
         if self.context() != context or self.enabled() != enabled:
-            raise RuntimeError('电源方案发生变化或功率调节开关回读失败，请重新读取')
-        return '已启用当前方案的功率调节' if enabled else '已关闭当前方案的功率调节'
+            raise RuntimeError(tr('power.switch_readback'))
+        return tr('power.enabled') if enabled else tr('power.disabled')
 
     def pending(self, name):
         if not name.startswith('nv_') or self.gpu_block_reason():
@@ -142,44 +143,45 @@ class PowerLimits:
 
     def apply(self, name, value, reset=False):
         if name not in ATTRIBUTES:
-            raise ValueError('不支持此功率属性')
+            raise ValueError(tr('power.attribute_unsupported'))
         if name.startswith('nv_') and (reason := self.gpu_block_reason()):
             raise RuntimeError(reason)
         context = self.context()
         before = self.read_attributes().get(name)
         if before is None:
-            raise ValueError('当前设备未开放此功率属性')
+            raise ValueError(tr('power.attribute_unavailable'))
         if reset:
             value = before['default']
         if (type(value) is not int or not before['minimum'] <= value <= before['maximum']
                 or (value - before['minimum']) % before['step']):
-            raise ValueError(f"数值需为 {before['minimum']}–{before['maximum']} {attribute_unit(name)}，步长 {before['step']} {attribute_unit(name)}")
+            raise ValueError(tr('power.value_range', minimum=before['minimum'], maximum=before['maximum'],
+                                unit=attribute_unit(name), step=before['step']))
         if not self.enabled():
-            raise ValueError('请先启用当前方案的功率调节')
+            raise ValueError(tr('power.enable_first'))
         original_pending = self.pending(name)
         try:
             if self.context() != context:
-                raise RuntimeError('电源方案已变化')
+                raise RuntimeError(tr('power.profile_changed'))
             self.write(name, value)
             if self.context() != context:
-                raise RuntimeError('电源方案已变化')
+                raise RuntimeError(tr('power.profile_changed'))
             current = self.read_attributes().get(name)
             pending = self.pending(name)
             if pending is not None and pending != value:
-                raise RuntimeError('独显存在其他待应用的功率值')
+                raise RuntimeError(tr('power.pending_conflict'))
             if pending == value:
-                return f"{before['label']} {value} {attribute_unit(name)} 已排队，独显唤醒后生效"
+                return tr('power.queued', label=before['label'], value=value, unit=attribute_unit(name))
             if current and current['current'] == value:
-                return f"{before['label']} 已应用 {value} {attribute_unit(name)}"
-            raise RuntimeError('驱动实际功率未达到请求值，asusd 可能只保存了配置')
+                return tr('power.applied', label=before['label'], value=value, unit=attribute_unit(name))
+            raise RuntimeError(tr('power.driver_mismatch'))
         except (OSError, subprocess.SubprocessError, RuntimeError, ValueError, KeyError, TypeError) as error:
             if self.context() != context:
-                raise RuntimeError('设置期间切换了电源或性能方案，请重新读取功率状态') from error
+                raise RuntimeError(tr('power.context_changed')) from error
             try:
                 self.write(name, original_pending if original_pending is not None else before['current'])
                 recovered = self.read_attributes().get(name)
                 if not recovered or recovered['current'] != before['current'] or self.pending(name) != original_pending:
-                    raise RuntimeError('原值恢复或待应用状态回读不一致')
+                    raise RuntimeError(tr('power.recovery_mismatch'))
             except Exception as recovery:
-                raise RuntimeError(f'功率设置失败：{error}；恢复未确认：{recovery}') from error
-            raise RuntimeError(f'功率设置失败，已恢复原值：{error}') from error
+                raise RuntimeError(tr('power.failed_recovery', error=error, recovery=recovery)) from error
+            raise RuntimeError(tr('power.failed_restored', error=error)) from error

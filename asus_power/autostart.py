@@ -1,8 +1,9 @@
-"""Manage the desktop entry for login startup in the user's XDG config."""
+"""管理用户 XDG 自启动项；登录启动保持普通用户身份，与交互提权偏好独立。"""
 import os
 from pathlib import Path
 import pwd
 from tempfile import NamedTemporaryFile
+from .i18n import desktop_entries
 
 
 def entry_path():
@@ -26,8 +27,7 @@ def set_enabled(enabled, path=None):
         temporary = Path(stream.name)
         try:
             stream.write(
-                '[Desktop Entry]\nType=Application\nName=ASUS Power Controller\n'
-                'Name[zh_CN]=电脑管家\n'
+                '[Desktop Entry]\nType=Application\n' + desktop_entries() +
                 'Exec=/usr/bin/python3 -m asus_power --start-hidden\n'
                 f'Path={project}\n'
                 'Icon=preferences-system-power\nStartupWMClass=Asuspowercontroller\nTerminal=false\nStartupNotify=false\n')
